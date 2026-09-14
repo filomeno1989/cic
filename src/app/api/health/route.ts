@@ -11,10 +11,17 @@ export async function GET() {
     const err = e as { code?: string; message?: string };
     const msg = String(err?.message || "");
     let hint = "DB_ERROR";
-    if (/Environment variable/i.test(msg)) hint = "ENV_MISSING";
+    if (/environment variable/i.test(msg)) hint = "ENV_MISSING";
     else if (err?.code === "P2021") hint = "TABLES_MISSING";
     else if (err?.code === "P1001") hint = "CANNOT_REACH_DB";
-    else if (err?.code === "P1000" || err?.code === "P1017") hint = "AUTH_FAILED";
-    return NextResponse.json({ ok: false, hint }, { status: 500 });
+    else if (err?.code === "P1000") hint = "AUTH_FAILED";
+    else if (err?.code === "P1017") hint = "CONNECTION_CLOSED";
+    else if (err?.code === "P2024") hint = "POOL_TIMEOUT";
+    else if (err?.code === "P2010") hint = "RAW_QUERY_FAILED";
+    else if (err?.code === "P1002") hint = "TLS_TIMEOUT";
+    else if (/invalid|malformed|parse|protocol/i.test(msg)) hint = "URL_INVALID";
+    else if (/prepared statement/i.test(msg)) hint = "PGBOUNCER_FLAG";
+    else if (/timeout|timed out/i.test(msg)) hint = "TIMEOUT";
+    return NextResponse.json({ ok: false, hint, code: err?.code ?? null }, { status: 500 });
   }
 }

@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 // GET /api/health - verificação de estado (público, sem dados sensíveis)
 // Em caso de falha devolve apenas uma CATEGORIA de erro (sem segredos nem hostnames)
-export async function GET() {
+// ?debug=<RECOVERY_KEY> inclui a mensagem real (com password removida) - só para o proprietário
+export async function GET(req: NextRequest) {
   try {
     await db.settings.count();
     return NextResponse.json({ ok: true, app: "CIC", time: new Date().toISOString() });
@@ -22,6 +23,11 @@ export async function GET() {
     else if (/invalid|malformed|parse|protocol/i.test(msg)) hint = "URL_INVALID";
     else if (/prepared statement/i.test(msg)) hint = "PGBOUNCER_FLAG";
     else if (/timeout|timed out/i.test(msg)) hint = "TIMEOUT";
-    return NextResponse.json({ ok: false, hint, code: err?.code ?? null }, { status: 500 });
+    const body: Record<string, unknown> = { ok: false, hint, code: err?.code ?? null };
+    const dbg = new URL(req.url).searchParams.get("debug");
+    if (dbg && process.env.RECOVERY_KEY && dbg === process.env.RECOVERY_KEY) {
+      body.debug = String(msg).replace(/:\/\/[^@/]*@/g, "://***@").slice(0, 600);
+    }
+    return NextResponse.json(body, { status: 500 });
   }
 }

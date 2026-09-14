@@ -9,10 +9,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { mt, fmtDate, daysUntil, variantLabel, LOSS_REASONS, DEFAULT_PRODUCT_CATEGORIES } from "@/lib/format";
+import { mt, fmtDate, daysUntil, variantLabel, LOSS_REASONS, DEFAULT_PRODUCT_CATEGORIES, DEFAULT_PRODUCT_BRANDS } from "@/lib/format";
 import type { ProductVariantFlat, SessionUser } from "@/lib/types";
 import {
-  Plus, Save, PackagePlus, AlertTriangle, CalendarClock, Trash2, Search, Loader2, X, Tags, Download, Check,
+  Plus, Save, PackagePlus, AlertTriangle, CalendarClock, Trash2, Search, Loader2, X, Tags, Download, Check, Award,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -46,6 +46,12 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   const [newCatName, setNewCatName] = useState("");
   const [addingNewCat, setAddingNewCat] = useState(false); // modo "+ nova" dentro do dialog de produto
 
+  // Marcas (quem fabrica - ex: Zara, Dior) - diferente de categoria; mesma mecânica
+  const [productBrands, setProductBrands] = useState<string[]>(DEFAULT_PRODUCT_BRANDS);
+  const [brandsOpen, setBrandsOpen] = useState(false);
+  const [newBrandName, setNewBrandName] = useState("");
+  const [addingNewBrand, setAddingNewBrand] = useState(false);
+
   // Entrada / quebra
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveType, setMoveType] = useState<"ENTRY" | "LOSS">("ENTRY");
@@ -74,6 +80,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         if (!res.ok) return;
         const data = await res.json();
         if (Array.isArray(data.productCategories) && data.productCategories.length > 0) setProductCats(data.productCategories);
+        if (Array.isArray(data.productBrands) && data.productBrands.length > 0) setProductBrands(data.productBrands);
       } catch { /* usa predefinidas */ }
     })();
   }, []);
@@ -121,6 +128,49 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
     toast({ title: "Lista sugerida carregada", description: `${DEFAULT_PRODUCT_CATEGORIES.length} categorias de cosméticos e acessórios disponíveis.` });
   };
 
+  const persistProductBrands = async (list: string[]) => {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productBrands: list }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Erro");
+      }
+      setProductBrands(list);
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro ao guardar marcas", variant: "destructive" });
+    }
+  };
+
+  const addProductBrand = (nameRaw?: string) => {
+    const name = (nameRaw ?? newBrandName).trim();
+    if (!name) return;
+    if (productBrands.some((b) => b.toLowerCase() === name.toLowerCase())) {
+      toast({ title: "Essa marca já existe", variant: "destructive" });
+      return;
+    }
+    setNewBrandName("");
+    void persistProductBrands([...productBrands, name]);
+    return name;
+  };
+
+  const removeProductBrand = (name: string) => {
+    const list = productBrands.filter((b) => b !== name);
+    if (list.length === 0) return;
+    void persistProductBrands(list);
+    if (draft.brand === name) setDraft((d) => ({ ...d, brand: "" }));
+  };
+
+  const loadSuggestedBrands = () => {
+    const merged = [...productBrands];
+    for (const b of DEFAULT_PRODUCT_BRANDS) if (!merged.some((x) => x.toLowerCase() === b.toLowerCase())) merged.push(b);
+    void persistProductBrands(merged);
+    toast({ title: "Lista sugerida carregada", description: `${DEFAULT_PRODUCT_BRANDS.length} marcas de cosméticos e perfumaria disponíveis.` });
+  };
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     if (!q) return catalog;
@@ -145,6 +195,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
     setDraft({ code: "", name: "", category: "", brand: "" });
     setVariants([emptyVariant()]);
     setAddingNewCat(false);
+    setAddingNewBrand(false);
     setDialogOpen(true);
   };
 
@@ -158,6 +209,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
       setEditing({ id: productId, code: vs[0].productCode, name: vs[0].productName, category: vs[0].category, brand: vs[0].brand ?? "" });
       setDraft({ code: vs[0].productCode, name: vs[0].productName, category: vs[0].category, brand: vs[0].brand ?? "" });
       setAddingNewCat(false);
+      setAddingNewBrand(false);
       setVariants(vs.map((v) => ({
         id: v.id,
         color: v.color ?? "", size: v.size ?? "",
@@ -277,6 +329,9 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         </Button>
         <Button variant="outline" onClick={() => setCatsOpen(true)}>
           <Tags className="w-4 h-4 mr-1 text-gold" /> Categorias
+        </Button>
+        <Button variant="outline" onClick={() => setBrandsOpen(true)}>
+          <Award className="w-4 h-4 mr-1 text-gold" /> Marcas
         </Button>
         <Button variant="outline" onClick={() => openMove("LOSS")}>
           <AlertTriangle className="w-4 h-4 mr-1 text-amber-600" /> Registar Quebra
@@ -416,92 +471,180 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
           <DialogHeader>
             <DialogTitle>{editing ? `Editar - ${editing.name}` : "Novo Produto com Grade"}</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div><Label className="text-xs">Código *</Label><Input value={draft.code} disabled={!!editing} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="PERF-010" className="font-mono" /></div>
-            <div className="col-span-2"><Label className="text-xs">Nome *</Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Perfume X 100ml" /></div>
-            <div>
-              <Label className="text-xs">Categoria</Label>
-              {!addingNewCat ? (
-                <select
-                  value={draft.category}
-                  onChange={(e) => {
-                    if (e.target.value === "__NEW__") { setAddingNewCat(true); setDraft({ ...draft, category: "" }); }
-                    else setDraft({ ...draft, category: e.target.value });
-                  }}
-                  className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">Sem categoria</option>
-                  {productCats.map((c) => <option key={c} value={c}>{c}</option>)}
-                  <option value="__NEW__">+ Nova categoria…</option>
-                </select>
-              ) : (
-                <div className="flex gap-1.5">
-                  <Input
-                    autoFocus
+          {/* ----- Secção: Identificação ----- */}
+          <div className="rounded-xl border p-4 space-y-3">
+            <p className="text-sm font-semibold text-gold">1. Identificação do produto</p>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div>
+                <Label className="text-xs">Código *</Label>
+                <Input value={draft.code} disabled={!!editing} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="PERF-010" className="font-mono" />
+              </div>
+              <div className="sm:col-span-3">
+                <Label className="text-xs">Nome do produto *</Label>
+                <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ex: Perfume X 100ml" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Categoria <span className="text-muted-foreground font-normal">- tipo de produto</span></Label>
+                {!addingNewCat ? (
+                  <select
                     value={draft.category}
-                    onChange={(e) => setDraft({ ...draft, category: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
+                    onChange={(e) => {
+                      if (e.target.value === "__NEW__") { setAddingNewCat(true); setDraft({ ...draft, category: "" }); }
+                      else setDraft({ ...draft, category: e.target.value });
+                    }}
+                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Sem categoria</option>
+                    {productCats.map((c) => <option key={c} value={c}>{c}</option>)}
+                    <option value="__NEW__">+ Nova categoria…</option>
+                  </select>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <Input
+                      autoFocus
+                      value={draft.category}
+                      onChange={(e) => setDraft({ ...draft, category: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const name = draft.category.trim();
+                          if (name && !productCats.includes(name)) addProductCat(name);
+                          setAddingNewCat(false);
+                        }
+                      }}
+                      placeholder="Ex: Perfumes (Dama)"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={() => {
                         const name = draft.category.trim();
                         if (name && !productCats.includes(name)) addProductCat(name);
                         setAddingNewCat(false);
-                      }
+                      }}
+                    >
+                      <Check className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div>
+                <Label className="text-xs">Marca <span className="text-muted-foreground font-normal">- quem fabrica (Zara, Dior…)</span></Label>
+                {!addingNewBrand ? (
+                  <select
+                    value={draft.brand}
+                    onChange={(e) => {
+                      if (e.target.value === "__NEW_BRAND__") { setAddingNewBrand(true); setDraft({ ...draft, brand: "" }); }
+                      else setDraft({ ...draft, brand: e.target.value });
                     }}
-                    placeholder="Ex: Perfumes (Dama)"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={() => {
-                      const name = draft.category.trim();
-                      if (name && !productCats.includes(name)) addProductCat(name);
-                      setAddingNewCat(false);
-                    }}
+                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
                   >
-                    <Check className="w-4 h-4" />
-                  </Button>
-                </div>
-              )}
+                    <option value="">Sem marca</option>
+                    {productBrands.map((b) => <option key={b} value={b}>{b}</option>)}
+                    <option value="__NEW_BRAND__">+ Nova marca…</option>
+                  </select>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <Input
+                      autoFocus
+                      value={draft.brand}
+                      onChange={(e) => setDraft({ ...draft, brand: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const name = draft.brand.trim();
+                          if (name && !productBrands.includes(name)) addProductBrand(name);
+                          setAddingNewBrand(false);
+                        }
+                      }}
+                      placeholder="Ex: Zara"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={() => {
+                        const name = draft.brand.trim();
+                        if (name && !productBrands.includes(name)) addProductBrand(name);
+                        setAddingNewBrand(false);
+                      }}
+                    >
+                      <Check className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
-            <div><Label className="text-xs">Marca</Label><Input value={draft.brand} onChange={(e) => setDraft({ ...draft, brand: e.target.value })} placeholder="Eudora" /></div>
           </div>
 
-          <div className="space-y-3">
+          {/* ----- Secção: Variações ----- */}
+          <div className="rounded-xl border p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <Label className="text-sm font-semibold">Variações (cor / tamanho) - stock individual</Label>
+              <p className="text-sm font-semibold text-gold">2. Variações <span className="text-muted-foreground font-normal">- preços e stock de cada cor/tamanho</span></p>
               <Button size="sm" variant="outline" onClick={() => setVariants([...variants, emptyVariant()])}>
                 <Plus className="w-3 h-3 mr-1" /> Variação
               </Button>
             </div>
             {variants.map((v, idx) => (
-              <div key={idx} className="grid grid-cols-2 md:grid-cols-5 gap-2 p-3 bg-muted/40 rounded-xl relative">
+              <div key={idx} className="relative rounded-lg border bg-muted/30 p-3 space-y-2">
                 {!editing && variants.length > 1 && (
                   <button className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5" onClick={() => setVariants(variants.filter((_, i) => i !== idx))}>
                     <X className="w-3 h-3" />
                   </button>
                 )}
-                <Input placeholder="Cor/Tom (ex: Tom 220)" value={v.color} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, color: e.target.value } : x)))} />
-                <Input placeholder="Tamanho (ex: 30ml)" value={v.size} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, size: e.target.value } : x)))} />
-                <div className="grid grid-cols-2 gap-1.5">
-                  <Input type="number" placeholder="Custo MT" value={v.costPrice} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, costPrice: e.target.value } : x)))} />
-                  <Input type="number" placeholder="Retalho MT" value={v.retailPrice} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, retailPrice: e.target.value } : x)))} />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Cor / Tom</Label>
+                    <Input placeholder="Ex: Tom 220" value={v.color} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, color: e.target.value } : x)))} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Tamanho</Label>
+                    <Input placeholder="Ex: 30ml" value={v.size} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, size: e.target.value } : x)))} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Validade <span className="text-gold">(opcional)</span></Label>
+                    <Input type="date" value={v.expiryDate} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, expiryDate: e.target.value } : x)))} />
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <Input type="number" placeholder="Grosso MT" value={v.wholesalePrice} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, wholesalePrice: e.target.value } : x)))} />
-                  <Input type="number" placeholder="Mín. grossista" value={v.wholesaleMinQty} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, wholesaleMinQty: e.target.value } : x)))} />
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Custo (MT)</Label>
+                    <Input type="number" placeholder="0" value={v.costPrice} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, costPrice: e.target.value } : x)))} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Preço retalho (MT) *</Label>
+                    <Input type="number" placeholder="0" value={v.retailPrice} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, retailPrice: e.target.value } : x)))} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Preço grosso (MT)</Label>
+                    <Input type="number" placeholder="opcional" value={v.wholesalePrice} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, wholesalePrice: e.target.value } : x)))} />
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">Qtd. mín. grosso</Label>
+                    <Input type="number" placeholder="3" value={v.wholesaleMinQty} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, wholesaleMinQty: e.target.value } : x)))} />
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {!editing && <Input type="number" placeholder="Stock" value={v.stock} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, stock: e.target.value } : x)))} />}
-                  <Input type="number" placeholder="Mín." value={v.minStock} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, minStock: e.target.value } : x)))} />
-                  <Input type="date" className="col-span-2" value={v.expiryDate} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, expiryDate: e.target.value } : x)))} />
-                </div>
+                {!editing && (
+                  <div className="grid grid-cols-2 gap-2 sm:max-w-[50%]">
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground">Stock inicial</Label>
+                      <Input type="number" placeholder="0" value={v.stock} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, stock: e.target.value } : x)))} />
+                    </div>
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground">Alerta stock mínimo</Label>
+                      <Input type="number" placeholder="3" value={v.minStock} onChange={(e) => setVariants(variants.map((x, i) => (i === idx ? { ...x, minStock: e.target.value } : x)))} />
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             <p className="text-[11px] text-muted-foreground">
-              Dica: o mesmo código base partilha variações - cada cor/tamanho controla stock próprio. Preencha a validade para receber alertas no painel (30/60/90 dias).
+              O mesmo código base partilha variações - cada cor/tamanho tem stock próprio. A <b>validade é opcional</b>: preencha apenas em produtos com prazo (cremes, cosméticos) para receber alertas no painel (30/60/90 dias).
             </p>
           </div>
 
@@ -544,6 +687,44 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
             </div>
             <p className="text-[11px] text-muted-foreground">
               A lista sugerida cobre perfumes, cabelo, maquilhagem, unhas, corporal, bebé, barbearia e acessórios. As alterações são guardadas automaticamente.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ----- Dialog gestor de marcas ----- */}
+      <Dialog open={brandsOpen} onOpenChange={setBrandsOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Award className="w-4 h-4 text-gold" /> Marcas</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Button variant="outline" className="w-full" onClick={loadSuggestedBrands}>
+              <Download className="w-4 h-4 mr-1" /> Carregar lista sugerida de marcas
+            </Button>
+            <div className="flex gap-2">
+              <Input
+                value={newBrandName}
+                onChange={(e) => setNewBrandName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addProductBrand(); } }}
+                placeholder="Nova marca personalizada…"
+              />
+              <Button className="btn-gold shrink-0" onClick={() => addProductBrand()} disabled={!newBrandName.trim()}>
+                <Plus className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="max-h-72 overflow-y-auto space-y-1.5">
+              {productBrands.map((b) => (
+                <div key={b} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                  <span className="text-sm">{b}</span>
+                  <button type="button" className="text-muted-foreground hover:text-destructive p-1" title="Remover" onClick={() => removeProductBrand(b)}>
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              A marca é quem fabrica o produto (Zara, Dior, Nivea…) - diferente da categoria, que é o tipo de produto (Perfumes, Cremes…). As alterações são guardadas automaticamente.
             </p>
           </div>
         </DialogContent>

@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
             nuit: s(x.nuit),
             expenseCategories: s(x.expenseCategories),
             productCategories: s(x.productCategories),
+            productBrands: s(x.productBrands),
           },
         })
 

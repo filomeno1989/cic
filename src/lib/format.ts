@@ -113,6 +113,34 @@ export const DEFAULT_PRODUCT_CATEGORIES = [
   "Outros",
 ]
 
+// Lista sugerida de MARCAS (a marca é diferente da categoria - ex: categoria "Perfumes (Dama)", marca "Zara")
+export const DEFAULT_PRODUCT_BRANDS = [
+  "Zara",
+  "Dior",
+  "Chanel",
+  "Versace",
+  "Calvin Klein",
+  "Carolina Herrera",
+  "Paco Rabanne",
+  "Lancôme",
+  "L'Oréal",
+  "Garnier",
+  "Maybelline",
+  "Revlon",
+  "Nivea",
+  "Vaseline",
+  "Dove",
+  "Eudora",
+  "O Boticário",
+  "Avon",
+  "Yves Rocher",
+  "Rubis",
+  "Bi-Ol",
+  "Ambar",
+  "Sally Hansen",
+  "Bath & Body Works",
+]
+
 export function parseCategories(json: string | null | undefined, fallback: string[]): string[] {
   try {
     const arr = json ? (JSON.parse(json) as unknown) : null

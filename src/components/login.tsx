@@ -156,7 +156,8 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
           /* ---------- Teclado de PIN normal ---------- */
           <div className="bg-[#141414] border border-[#d4af37]/25 rounded-2xl p-6 shadow-2xl">
             <div className="flex justify-center gap-3 mb-6 h-4">
-              {Array.from({ length: Math.max(4, pin.length) }).map((_, i) => (
+              {/* 6 posições - aceita PIN de 4, 5 ou 6 dígitos */}
+              {Array.from({ length: 6 }).map((_, i) => (
                 <span
                   key={i}
                   className={`w-3 h-3 rounded-full border transition-all ${

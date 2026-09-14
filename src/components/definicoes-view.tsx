@@ -153,7 +153,8 @@ export function DefinicoesView({
         <div><Label className="text-xs">Nome da loja</Label><Input value={form.storeName} disabled={!isManager} onChange={(e) => setForm({ ...form, storeName: e.target.value })} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label className="text-xs">Telefone</Label><Input value={form.phone} disabled={!isManager} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-          <div><Label className="text-xs">Endereço</Label><Input value={form.address} disabled={!isManager} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
+          <div><Label className="text-xs">NUIT <span className="text-muted-foreground font-normal">(sai no recibo)</span></Label><Input value={form.nuit ?? ""} inputMode="numeric" maxLength={9} disabled={!isManager} onChange={(e) => setForm({ ...form, nuit: e.target.value.replace(/\D/g, "") })} placeholder="Ex: 142369567" /></div>
+          <div className="col-span-2"><Label className="text-xs">Endereço</Label><Input value={form.address} disabled={!isManager} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
         </div>
         <div><Label className="text-xs">Mensagem no rodapé do recibo</Label><Input value={form.receiptFooter} disabled={!isManager} onChange={(e) => setForm({ ...form, receiptFooter: e.target.value })} /></div>
 

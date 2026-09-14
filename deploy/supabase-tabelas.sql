@@ -214,6 +214,7 @@ CREATE TABLE "Settings" (
     "nuit" TEXT NOT NULL DEFAULT '',
     "expenseCategories" TEXT NOT NULL DEFAULT '',
     "productCategories" TEXT NOT NULL DEFAULT '',
+    "productBrands" TEXT NOT NULL DEFAULT '',
 
     CONSTRAINT "Settings_pkey" PRIMARY KEY ("id")
 );

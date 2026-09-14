@@ -104,6 +104,7 @@ export function ReceiptDialog({
               <div style={{ fontWeight: "bold", fontSize: "1.15em" }}>{store.storeName}</div>
               {store.address && <div>{store.address}</div>}
               {store.phone && <div>Tel: {store.phone}</div>}
+              {store.nuit && <div>NUIT: {store.nuit}</div>}
             </div>
             <div style={{ borderTop: "1px dashed #000", margin: "4px 0" }} />
             <div>Recibo: #{String(sale.number).padStart(5, "0")}</div>

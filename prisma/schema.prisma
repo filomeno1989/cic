@@ -207,4 +207,5 @@ model Settings {
   nuit              String  @default("")
   expenseCategories String  @default("") // JSON array de categorias de despesa (fixas)
   productCategories String  @default("") // JSON array de categorias de produtos
+  productBrands     String  @default("") // JSON array de marcas
 }

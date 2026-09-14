@@ -51,3 +51,4 @@ Modelo em `.env.example`. **Nunca** commitar o ficheiro `.env` real.
 
 - **Produção:** https://cic-loja.vercel.app
 - Se `/api/health` devolver `URL_INVALID`: o valor na Vercel deve conter SÓ a URL - sem aspas, sem espaços, sem `[YOUR-PASSWORD]`, e apenas um único `?` (ex.: `...postgres?pgbouncer=true&connection_limit=10`).
+- Variaveis de ambiente corrigidas via API da Vercel (DATABASE_URL / DIRECT_URL).

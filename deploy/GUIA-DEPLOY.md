@@ -59,15 +59,19 @@ AUTH_SECRET=cole_aqui_um_codigo_secreto
 
 ## PARTE 3 — Criar as tabelas no Supabase (±3 min)
 
-No computador, dentro da pasta do projeto, abra o terminal e rode:
+**Opção A — pelo navegador (recomendada, sem precisar de computador):**
+1. No GitHub, abra o ficheiro `deploy/supabase-tabelas.sql` → clique no botão de copiar conteúdo.
+2. No Supabase: **SQL Editor** (barra lateral esquerda) → **New query** → cole TODO o SQL → **Run**.
+3. Se aparecer **Success**, as tabelas estão criadas ✅
+
+**Opção B — com terminal no computador** (dentro da pasta do projecto, com o `.env` da PARTE 2 já criado):
 
 ```bash
 npm install
 npx prisma db push
 ```
 
-Se terminar sem erros vermelhos, as tabelas estão criadas no Supabase ✅
-(Pode confirmar no Supabase → **Table Editor** — vai ver `User`, `Product`, `Sale`, etc.)
+Confirme no Supabase → **Table Editor** — vai ver `User`, `Product`, `Sale`, etc.
 
 ---
 

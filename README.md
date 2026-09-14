@@ -35,6 +35,7 @@ Instruções passo-a-passo em **[deploy/GUIA-DEPLOY.md](deploy/GUIA-DEPLOY.md)**
 | `DATABASE_URL` | Ligação PostgreSQL **pooled** (porta 6543) — usada pela aplicação |
 | `DIRECT_URL` | Ligação **directa** (porta 5432) — usada nas migrações do Prisma |
 | `AUTH_SECRET` | Segredo que assina os cookies de sessão (HMAC) |
+| `RECOVERY_KEY` | (Opcional, só o proprietário) ativa a porta de emergência `/api/manutencao` para recuperar acesso — ver `deploy/RECUPERACAO-ACESSO.md` |
 
 Modelo em `.env.example`. **Nunca** commitar o ficheiro `.env` real.
 

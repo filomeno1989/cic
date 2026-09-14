@@ -1,7 +1,17 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
 # dependencies
 node_modules
 /.pnp
 .pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
 
 # next.js
 /.next/
@@ -14,43 +24,31 @@ node_modules
 .DS_Store
 *.pem
 
-# logs
+# debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-*.log
-dev.log
-dev.out.log
-server.log
 
-# env files — NUNCA commitar o .env real (só o modelo .env.example entra)
-.env
-.env.*
-!.env.example
-
-# base de dados local (dados reais da loja — NUNCA commitar)
-/db/
-*.db
-*.db-journal
-*.sqlite
-*.sqlite3
+# env files (can opt-in for committing if needed)
+.env*
 
 # vercel
 .vercel
 
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+local-*
+.claude
+.z-ai-config
+*.log
+dev.log
+dev.out.log
+test
+prompt
 
-# ficheiros internos do ambiente de desenvolvimento (não fazem parte da app)
-/worklog.md
-/scripts/
-/upload/
-/download/
-/tool-results/
-/examples/
-/tests/
-/mini-services/
-Caddyfile
-/deploy/*.zip
+server.log
+# Skills directory
+/skills/

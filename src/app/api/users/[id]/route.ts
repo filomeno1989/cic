@@ -21,6 +21,20 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       const clash = await db.user.findFirst({ where: { pin: String(pin), id: { not: id } } })
       if (clash) return NextResponse.json({ error: `Este PIN já é usado por ${clash.name}` }, { status: 400 })
     }
+
+    // ---- Proteções anti-bloqueio (o proprietário nunca pode ficar sem acesso) ----
+    const target = await db.user.findUnique({ where: { id } })
+    if (!target) return NextResponse.json({ error: "Funcionário não encontrado" }, { status: 404 })
+    // 1) Ninguém pode arquivar a própria conta (perderia o acesso imediatamente)
+    if (session.id === id && active === false)
+      return NextResponse.json({ error: "Não pode arquivar a sua própria conta" }, { status: 400 })
+    // 2) Não desativar nem rebaixar o ÚLTIMO gerente ativo - a loja ficaria sem gestão
+    if (target.role === "GERENTE" && (active === false || role === "CAIXA")) {
+      const outrosGerentes = await db.user.count({ where: { role: "GERENTE", active: true, id: { not: id } } })
+      if (outrosGerentes === 0)
+        return NextResponse.json({ error: "Não pode desativar ou rebaixar o último gerente ativo - crie/ative outro gerente primeiro" }, { status: 400 })
+    }
+
     const user = await db.user.update({
       where: { id },
       data: {

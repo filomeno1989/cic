@@ -1,12 +1,13 @@
 // ============================================================
 // Middleware de autenticação - protege TODAS as rotas /api/*
-// excepto login, setup (primeiro acesso) e health.
+// excepto login, setup (primeiro acesso), health e manutencao
+// (porta de emergência com chave própria RECOVERY_KEY).
 // Sem sessão válida → 401. Roda no Edge (rápido, sem BD).
 // ============================================================
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken, SESSION_COOKIE } from "@/lib/session";
 
-const PUBLIC_PATHS = ["/api/login", "/api/setup", "/api/health"];
+const PUBLIC_PATHS = ["/api/login", "/api/setup", "/api/health", "/api/manutencao"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

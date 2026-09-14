@@ -155,9 +155,10 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
         ) : (
           /* ---------- Teclado de PIN normal ---------- */
           <div className="bg-[#141414] border border-[#d4af37]/25 rounded-2xl p-6 shadow-2xl">
-            <div className="flex justify-center gap-3 mb-6 h-4">
-              {/* 6 posições - aceita PIN de 4, 5 ou 6 dígitos */}
-              {Array.from({ length: 6 }).map((_, i) => (
+            <div className="flex justify-center gap-3 mb-2 h-4">
+              {/* Bolinhas dinâmicas: começam em 4 e crescem até 6 conforme se digita -
+                  comunica visualmente que o PIN pode ter 4, 5 ou 6 dígitos */}
+              {Array.from({ length: Math.min(6, Math.max(4, pin.length)) }).map((_, i) => (
                 <span
                   key={i}
                   className={`w-3 h-3 rounded-full border transition-all ${
@@ -166,6 +167,7 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
                 />
               ))}
             </div>
+            <p className="text-center text-[11px] text-[#a1a1aa] mb-4">PIN de 4 a 6 dígitos</p>
 
             <div className="grid grid-cols-3 gap-3">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (

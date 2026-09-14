@@ -46,3 +46,8 @@ Modelo em `.env.example`. **Nunca** commitar o ficheiro `.env` real.
 - Autorização de gerente por PIN sem trocar de sessão
 - Baixa de stock atómica (sem stock negativo, mesmo com vendas simultâneas)
 - Fuso horário de Maputo (Africa/Maputo) no servidor para "hoje"/mês
+
+## Estado do deploy
+
+- **Produção:** https://cic-loja.vercel.app
+- Se `/api/health` devolver `URL_INVALID`: o valor na Vercel deve conter SÓ a URL - sem aspas, sem espaços, sem `[YOUR-PASSWORD]`, e apenas um único `?` (ex.: `...postgres?pgbouncer=true&connection_limit=10`).

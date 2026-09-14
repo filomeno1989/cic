@@ -1,0 +1,56 @@
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+dev.log
+dev.out.log
+server.log
+
+# env files — NUNCA commitar o .env real (só o modelo .env.example entra)
+.env
+.env.*
+!.env.example
+
+# base de dados local (dados reais da loja — NUNCA commitar)
+/db/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# ficheiros internos do ambiente de desenvolvimento (não fazem parte da app)
+/worklog.md
+/scripts/
+/upload/
+/download/
+/tool-results/
+/examples/
+/tests/
+/mini-services/
+Caddyfile
+/deploy/*.zip

@@ -41,7 +41,7 @@ Requisitos: uma conta de e-mail e o código do sistema (este pacote).
 
 ## PARTE 2 — Preparar o código (±5 min)
 
-1. Descompacte o pacote `cic-vercel-deploy.zip` numa pasta do seu computador.
+1. O código já está no repositório **https://github.com/filomeno1989/cic** — se precisar dele no computador, use o botão verde **Code → Download ZIP** (ou `git clone`).
 2. O ficheiro `prisma/schema.prisma` **já está configurado para PostgreSQL** (não mexa).
 3. Crie um ficheiro chamado `.env` dentro da pasta (pode copiar o `.env.example`) e preencha:
 
@@ -73,11 +73,9 @@ Se terminar sem erros vermelhos, as tabelas estão criadas no Supabase ✅
 
 ## PARTE 4 — Colocar no ar na Vercel (±15 min)
 
-### 4.1 — Subir o código para o GitHub
-1. Entre em **https://github.com** → crie conta → botão **+** (canto) → **New repository**:
-   - Nome: `cic-loja` · Privado (Private) · **Create repository**
-2. Na página que abre, clique **uploading an existing file**, arraste TODA a pasta do projeto
-   (sem `node_modules`, sem `.next`, sem `.env` — só o que está no pacote) e clique **Commit changes**.
+### 4.1 — Código já no GitHub ✅
+O código completo já está no repositório **https://github.com/filomeno1989/cic** —
+não precisa de subir nada manualmente. Passe directamente ao passo 4.2.
 
 > ⚠️ NUNCA suba o ficheiro `.env` para o GitHub — as variáveis vão ser postas na Vercel.
 

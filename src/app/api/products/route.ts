@@ -69,7 +69,10 @@ export async function POST(req: NextRequest) {
       include: { variants: true },
     })
     return NextResponse.json(product)
-  } catch {
+  } catch (e) {
+    // Código duplicado em corrida (o check manual acima pode falhar sob duplo-clique)
+    if (typeof e === "object" && e !== null && "code" in e && (e as { code?: string }).code === "P2002")
+      return NextResponse.json({ error: "Código de produto já existe" }, { status: 400 })
     return NextResponse.json({ error: "Erro ao criar produto" }, { status: 500 })
   }
 }

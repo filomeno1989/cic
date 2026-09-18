@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +15,7 @@ import {
   Plus, Save, PackagePlus, AlertTriangle, CalendarClock, Trash2, Search, Loader2, X, Tags, Download, Check, Award,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { fetchT } from "@/lib/http";
 
 type VariantDraft = {
   id?: string; color: string; size: string; costPrice: string; retailPrice: string;
@@ -29,6 +30,7 @@ const emptyVariant = (): VariantDraft => ({
 type HistoryData = {
   entries: Array<{ id: string; qty: number; costPrice: number; supplier: string | null; date: string; product: string; variantLabel: string }>;
   losses: Array<{ id: string; qty: number; reason: string; notes: string | null; date: string; product: string; variantLabel: string }>;
+  suppliers?: Array<{ name: string; entries: number; units: number; totalCost: number; lastDate: string }>;
 };
 
 export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; catalog: ProductVariantFlat[]; onReload: () => void }) {
@@ -39,6 +41,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   const [draft, setDraft] = useState({ code: "", name: "", category: "", brand: "" });
   const [variants, setVariants] = useState<VariantDraft[]>([emptyVariant()]);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false); // trava duplo-clique no MESMO tick
 
   // Categorias de produtos (lista sugerida + personalizadas, guardadas na BD)
   const [productCats, setProductCats] = useState<string[]>(DEFAULT_PRODUCT_CATEGORIES);
@@ -61,11 +64,13 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   const [moveSupplier, setMoveSupplier] = useState("");
   const [moveReason, setMoveReason] = useState("DERRETEU");
   const [moveNotes, setMoveNotes] = useState("");
+  const [moveSaving, setMoveSaving] = useState(false);
+  const moveSavingRef = useRef(false); // trava duplo-clique (causa real do stock duplicado)
   const [history, setHistory] = useState<HistoryData>({ entries: [], losses: [] });
 
   const loadHistory = useCallback(async () => {
     try {
-      const res = await fetch("/api/stock?limit=40");
+      const res = await fetchT("/api/stock?limit=40");
       if (res.ok) setHistory(await res.json());
     } catch { /* silencioso */ }
   }, []);
@@ -76,7 +81,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/settings");
+        const res = await fetchT("/api/settings");
         if (!res.ok) return;
         const data = await res.json();
         if (Array.isArray(data.productCategories) && data.productCategories.length > 0) setProductCats(data.productCategories);
@@ -87,7 +92,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
 
   const persistProductCats = async (list: string[]) => {
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetchT("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ productCategories: list }),
@@ -130,7 +135,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
 
   const persistProductBrands = async (list: string[]) => {
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetchT("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ productBrands: list }),
@@ -201,7 +206,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
 
   const openEdit = async (productId: string) => {
     try {
-      const res = await fetch("/api/products");
+      const res = await fetchT("/api/products");
       if (!res.ok) throw new Error();
       const all: ProductVariantFlat[] = await res.json();
       const vs = all.filter((v) => v.productId === productId);
@@ -225,7 +230,12 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
     }
   };
 
+  // Códigos já usados - para avisar ANTES de tentar gravar
+  const usedCodes = useMemo(() => new Set(catalog.map((v) => v.productCode.toUpperCase())), [catalog]);
+  const codeTaken = !editing && !!draft.code.trim() && usedCodes.has(draft.code.trim().toUpperCase());
+
   const save = async () => {
+    if (savingRef.current) return; // já está a gravar
     if (!draft.code.trim() || !draft.name.trim()) {
       toast({ title: "Código e nome são obrigatórios", variant: "destructive" });
       return;
@@ -236,6 +246,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
       return;
     }
     setSaving(true);
+    savingRef.current = true;
     try {
       const payload = {
         ...draft,
@@ -252,8 +263,8 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         })),
       };
       const res = editing
-        ? await fetch(`/api/products/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        : await fetch("/api/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        ? await fetchT(`/api/products/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        : await fetchT("/api/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? "Erro ao guardar");
@@ -262,25 +273,29 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
       setDialogOpen(false);
       onReload();
     } catch (e) {
-      toast({ title: e instanceof Error ? e.message : "Erro", variant: "destructive" });
+      toast({ title: e instanceof Error ? e.message : "Erro de rede - verifique a internet e tente de novo", variant: "destructive" });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const submitMove = async () => {
+    if (moveSavingRef.current) return; // DUPLO-CLIQUE BLOQUEADO (era a causa do stock duplicado)
     const qty = parseInt(moveQty);
     if (!moveVariant || !qty || qty <= 0) {
       toast({ title: "Selecione o produto e a quantidade", variant: "destructive" });
       return;
     }
+    setMoveSaving(true);
+    moveSavingRef.current = true;
     try {
-      const res = await fetch("/api/stock", {
+      const res = await fetchT("/api/stock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           moveType === "ENTRY"
-            ? { type: "ENTRY", variantId: moveVariant, qty, costPrice: parseFloat(moveCost) || 0, supplier: moveSupplier, userId: user.id }
+            ? { type: "ENTRY", variantId: moveVariant, qty, costPrice: parseFloat(moveCost) || 0, supplier: moveSupplier.trim(), userId: user.id }
             : { type: "LOSS", variantId: moveVariant, qty, reason: moveReason, notes: moveNotes, userId: user.id }
         ),
       });
@@ -294,7 +309,10 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
       onReload();
       loadHistory();
     } catch (e) {
-      toast({ title: e instanceof Error ? e.message : "Erro", variant: "destructive" });
+      toast({ title: e instanceof Error ? e.message : "Erro de rede - verifique a internet", variant: "destructive" });
+    } finally {
+      moveSavingRef.current = false;
+      setMoveSaving(false);
     }
   };
 
@@ -462,6 +480,25 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
               {history.losses.length === 0 && <p className="text-center text-muted-foreground py-8 text-xs">Sem quebras registadas.</p>}
             </div>
           </div>
+          <div className="card-lux md:col-span-2">
+            <h3 className="font-semibold text-sm px-4 py-3 border-b">Fornecedores <span className="text-muted-foreground font-normal">- total comprado por fornecedor</span></h3>
+            <div className="divide-y max-h-96 overflow-y-auto">
+              {(history.suppliers ?? []).map((s) => (
+                <div key={s.name} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{s.name}</p>
+                    <p className="text-[11px] text-muted-foreground">{s.entries} entrada{s.entries > 1 ? "s" : ""} · {s.units} un. · última {fmtDate(s.lastDate)}</p>
+                  </div>
+                  <span className="text-gold font-semibold text-sm whitespace-nowrap">{mt(s.totalCost)}</span>
+                </div>
+              ))}
+              {(history.suppliers ?? []).length === 0 && (
+                <p className="text-center text-muted-foreground py-8 text-xs">
+                  Nenhum fornecedor ainda - o nome gravado na Entrada de Mercadoria aparece aqui automaticamente.
+                </p>
+              )}
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -478,6 +515,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
               <div>
                 <Label className="text-xs">Código *</Label>
                 <Input value={draft.code} disabled={!!editing} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="PERF-010" className="font-mono" />
+                {codeTaken && <p className="text-[11px] text-destructive mt-1">Este código já existe - use outro (ex: acrescente 02, 03…)</p>}
               </div>
               <div className="sm:col-span-3">
                 <Label className="text-xs">Nome do produto *</Label>
@@ -764,7 +802,10 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                 </div>
                 <div>
                   <Label className="text-xs">Fornecedor</Label>
-                  <Input value={moveSupplier} onChange={(e) => setMoveSupplier(e.target.value)} placeholder="Mukherista / Baixa / Maputo" />
+                  <Input value={moveSupplier} onChange={(e) => setMoveSupplier(e.target.value)} placeholder="Mukherista / Baixa / Maputo" list="lista-fornecedores" />
+                  <datalist id="lista-fornecedores">
+                    {(history.suppliers ?? []).map((s) => <option key={s.name} value={s.name} />)}
+                  </datalist>
                 </div>
               </div>
             ) : (
@@ -785,9 +826,11 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                 <p className="text-[11px] text-muted-foreground">A quebra sai do stock e NÃO conta como venda.</p>
               </div>
             )}
-            <Button className="btn-gold w-full" onClick={submitMove}>
-              <CalendarClock className="w-4 h-4 mr-1" />
-              {moveType === "ENTRY" ? "Registar Entrada" : "Registar Quebra"}
+            <Button className="btn-gold w-full" onClick={submitMove} disabled={moveSaving}>
+              {moveSaving
+                ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                : <CalendarClock className="w-4 h-4 mr-1" />}
+              {moveSaving ? "A registar…" : moveType === "ENTRY" ? "Registar Entrada" : "Registar Quebra"}
             </Button>
           </div>
         </DialogContent>

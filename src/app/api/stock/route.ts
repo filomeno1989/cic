@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
           variantId,
           qty: quantity,
           costPrice: Number(costPrice) || variant.costPrice,
-          supplier: supplier || null,
+          supplier: (typeof supplier === "string" ? supplier.trim() : "") || null,
           userId: session.id,
         },
       }),
@@ -57,12 +57,12 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET /api/stock?limit=50 - histórico de movimentações
+// GET /api/stock?limit=50 - histórico de movimentações + resumo de fornecedores
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "60"), 200)
-    const [entries, losses] = await Promise.all([
+    const [entries, losses, supplierRows] = await Promise.all([
       db.stockEntry.findMany({
         orderBy: { date: "desc" }, take: limit,
         include: { variant: { include: { product: true } } },
@@ -71,7 +71,32 @@ export async function GET(req: NextRequest) {
         orderBy: { date: "desc" }, take: limit,
         include: { variant: { include: { product: true } } },
       }),
+      // Fornecedores: agregado de TODAS as entradas (não só as últimas)
+      db.stockEntry.groupBy({
+        by: ["supplier"],
+        where: { supplier: { not: null } },
+        _count: { id: true },
+        _sum: { qty: true },
+        _max: { date: true },
+      }),
     ])
+    // total comprado por fornecedor (qty * custo da entrada)
+    const allEntries = await db.stockEntry.findMany({ select: { supplier: true, qty: true, costPrice: true } })
+    const suppliers = supplierRows
+      .map((s) => {
+        const name = s.supplier ?? ""
+        const totalCost = allEntries
+          .filter((e) => e.supplier === name)
+          .reduce((a, e) => a + e.qty * e.costPrice, 0)
+        return {
+          name,
+          entries: s._count.id,
+          units: s._sum.qty ?? 0,
+          totalCost,
+          lastDate: s._max.date,
+        }
+      })
+      .sort((a, b) => (a.lastDate && b.lastDate ? +new Date(b.lastDate) - +new Date(a.lastDate) : 0))
     return NextResponse.json({
       entries: entries.map((e) => ({
         id: e.id, qty: e.qty, costPrice: e.costPrice, supplier: e.supplier, date: e.date,
@@ -81,6 +106,7 @@ export async function GET(req: NextRequest) {
         id: l.id, qty: l.qty, reason: l.reason, notes: l.notes, date: l.date,
         product: l.variant.product.name, variantLabel: [l.variant.color, l.variant.size].filter(Boolean).join(" · "),
       })),
+      suppliers,
     })
   } catch {
     return NextResponse.json({ error: "Erro ao carregar histórico" }, { status: 500 })

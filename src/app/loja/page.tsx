@@ -9,10 +9,11 @@
 // ============================================================
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Search, MessageCircle, PackageX, Sparkles, Phone, MapPin } from "lucide-react";
+import { Search, MessageCircle, PackageX, Sparkles, Phone, MapPin, Store, Bike } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { mt, waNumber } from "@/lib/format";
 import { fetchT } from "@/lib/http";
+import { APP_SIGNATURE, APP_SIGNATURE_FULL } from "@/lib/version";
 
 type CatalogoItem = {
   id: string; productId: string; nome: string; codigo: string;
@@ -36,6 +37,9 @@ function PortalLoja() {
   const [busca, setBusca] = useState("");
   const [cat, setCat] = useState("Todos");
   const [selecionado, setSelecionado] = useState<CatalogoItem | null>(null);
+  // Entrega: o cliente escolhe levantar na loja ou receber em casa -
+  // a escolha vai na mensagem do WhatsApp e a loja combina os detalhes no chat.
+  const [entrega, setEntrega] = useState<"levantar" | "casa">("levantar");
 
   const carregar = async () => {
     setEstado("carrega");
@@ -71,7 +75,10 @@ function PortalLoja() {
     const n = waNumber(config.whatsappLoja);
     if (!n) return null;
     const v = variante(item) ? ` (${variante(item)})` : "";
-    const texto = `Olá! Vi no catálogo da ${config.storeName}: ${item.nome}${v} — ${mt(item.preco)}. Gostaria de encomendar, por favor.`;
+    const como = entrega === "casa"
+      ? "Gostaria de encomendar com entrega em casa, por favor."
+      : "Gostaria de encomendar para levantar na loja, por favor.";
+    const texto = `Olá! Vi no catálogo da ${config.storeName}: ${item.nome}${v} — ${mt(item.preco)}. ${como}`;
     return `https://wa.me/${n}?text=${encodeURIComponent(texto)}`;
   };
 
@@ -205,11 +212,12 @@ function PortalLoja() {
             <p className="text-xs text-neutral-500 flex items-center justify-center gap-1"><Phone className="w-3 h-3" /> {config.phone}</p>
           )}
           <p className="text-[11px] text-neutral-400">{config?.storeName ?? "CIC Fragrâncias & Glamour"} · {config?.address ?? "Beira, Moçambique"}</p>
+          <p className="text-[10px] italic text-neutral-400/60 select-none pt-1" title={APP_SIGNATURE_FULL}>{APP_SIGNATURE}</p>
         </div>
       </footer>
 
       {/* Detalhe do produto */}
-      <Dialog open={!!selecionado} onOpenChange={(v) => !v && setSelecionado(null)}>
+      <Dialog open={!!selecionado} onOpenChange={(v) => { if (!v) { setSelecionado(null); setEntrega("levantar"); } }}>
         <DialogContent className="max-w-sm bg-white">
           {selecionado && (
             <>
@@ -235,11 +243,41 @@ function PortalLoja() {
                 </p>
               </div>
               {encomendar(selecionado) ? (
-                <a href={encomendar(selecionado) ?? "#"} target="_blank" rel="noopener noreferrer" className="block">
-                  <button className="w-full h-11 rounded-xl bg-[#25D366] text-white font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-105 active:scale-[0.99] transition-all">
-                    <MessageCircle className="w-4.5 h-4.5" /> Encomendar no WhatsApp
-                  </button>
-                </a>
+                <>
+                  {/* Escolha da entrega - vai na mensagem do WhatsApp */}
+                  <div>
+                    <p className="text-[11px] font-medium text-neutral-500 mb-1.5">Como prefere receber?</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEntrega("levantar")}
+                        className={`rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                          entrega === "levantar"
+                            ? "bg-neutral-900 text-amber-200 border-neutral-900"
+                            : "bg-white text-neutral-600 border-amber-200 hover:border-amber-400"
+                        }`}
+                      >
+                        <Store className="w-3.5 h-3.5" /> Levantar na loja
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEntrega("casa")}
+                        className={`rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                          entrega === "casa"
+                            ? "bg-neutral-900 text-amber-200 border-neutral-900"
+                            : "bg-white text-neutral-600 border-amber-200 hover:border-amber-400"
+                        }`}
+                      >
+                        <Bike className="w-3.5 h-3.5" /> Receber em casa
+                      </button>
+                    </div>
+                  </div>
+                  <a href={encomendar(selecionado) ?? "#"} target="_blank" rel="noopener noreferrer" className="block">
+                    <button className="w-full h-11 rounded-xl bg-[#25D366] text-white font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-105 active:scale-[0.99] transition-all">
+                      <MessageCircle className="w-4.5 h-4.5" /> Encomendar no WhatsApp
+                    </button>
+                  </a>
+                </>
               ) : (
                 <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-center gap-2 text-sm text-neutral-700">
                   <PackageX className="w-4 h-4 text-amber-500 shrink-0" />

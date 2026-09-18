@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { mt } from "@/lib/format";
 import type { SessionUser } from "@/lib/types";
 import type { StoreInfo } from "@/components/receipt";
+import { APP_VERSION_LABEL, APP_SIGNATURE, APP_SIGNATURE_FULL } from "@/lib/version";
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Wallet, Users2, FileBarChart, Settings,
   LogOut, Moon, Sun, Wifi, WifiOff, RefreshCw, Menu, X, Loader2, CheckCircle2,
@@ -77,7 +78,7 @@ export function AppShell({
         ))}
       </nav>
       <div className="p-4 border-t">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between">
           <div className="min-w-0">
             <p className="text-sm font-semibold truncate">{user.name}</p>
             <p className="text-[10px] text-muted-foreground">
@@ -87,6 +88,11 @@ export function AppShell({
           <Button size="icon" variant="ghost" onClick={onLogout} title="Sair">
             <LogOut className="w-4 h-4" />
           </Button>
+        </div>
+        {/* Versão + assinatura de produção - discreto, sempre visível no fim da barra lateral */}
+        <div className="mt-3 pt-2 text-center select-none" style={{ borderTop: "1px dashed color-mix(in oklab, var(--gold) 25%, transparent)" }}>
+          <p className="text-[9px] text-muted-foreground/80">{APP_VERSION_LABEL}</p>
+          <p className="text-[9px] italic text-muted-foreground/60 mt-0.5" title={APP_SIGNATURE_FULL}>{APP_SIGNATURE}</p>
         </div>
       </div>
     </>
@@ -171,7 +177,14 @@ export function AppShell({
         )}
 
         {/* Conteúdo */}
-        <main className="flex-1 min-w-0 p-3 sm:p-5 overflow-x-hidden">{children}</main>
+        <main className="flex-1 min-w-0 p-3 sm:p-5 overflow-x-hidden flex flex-col">
+          <div className="flex-1">{children}</div>
+          {/* Fim do sistema: versão + assinatura de produção */}
+          <footer className="pt-10 pb-1 text-center select-none" title={APP_SIGNATURE_FULL}>
+            <p className="text-[10px] text-muted-foreground/70">{APP_VERSION_LABEL}</p>
+            <p className="text-[10px] italic text-muted-foreground/50 mt-0.5">{APP_SIGNATURE}</p>
+          </footer>
+        </main>
       </div>
     </div>
   );

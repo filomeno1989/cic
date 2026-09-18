@@ -8,6 +8,7 @@ import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
 import { fetchT } from "@/lib/http";
 import type { SessionUser } from "@/lib/types";
+import { APP_VERSION, APP_SIGNATURE, APP_SIGNATURE_FULL } from "@/lib/version";
 
 type LoginUser = { id: string; name: string; role: string };
 
@@ -325,6 +326,11 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
             )}
           </div>
         )}
+
+        {/* Assinatura discreta de produção no fim do ecrã de entrada */}
+        <p className="text-center text-[10px] italic text-[#52525b] mt-6 select-none" title={APP_SIGNATURE_FULL}>
+          {APP_SIGNATURE} · v{APP_VERSION}
+        </p>
       </div>
     </div>
   );

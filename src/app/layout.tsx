@@ -7,7 +7,11 @@ export const metadata: Metadata = {
   title: "CIC Fragrâncias & Glamour · Sistema de Gestão",
   description:
     "Sistema integrado de gestão e PDV para loja de cosméticos e acessórios - Beira, Moçambique. Offline-first, M-Pesa, e-Mola, mKesh, fiação e mais.",
-  icons: { icon: "/logo-cic.png" },
+  icons: { icon: "/logo-cic.png", apple: "/apple-touch-icon.png" },
+  // v2.3 PWA: "Adicionar ao ecrã principal" no iPhone/tablet abre como app,
+  // com o login do pessoal (/gestao) como página inicial
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "CIC Gestão" },
 };
 
 export const viewport: Viewport = {

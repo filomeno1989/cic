@@ -29,7 +29,7 @@ export async function PUT(req: NextRequest) {
     if (session.role !== "GERENTE") return forbidden()
 
     const body = await req.json()
-    const { storeName, phone, address, receiptFooter, thermalWidth, nuit, expenseCategories, productCategories, productBrands, whatsappLoja } = body
+    const { storeName, phone, address, receiptFooter, thermalWidth, nuit, expenseCategories, productCategories, productBrands, whatsappLoja, instagramUrl, facebookUrl, tiktokUrl } = body
 
     // Categorias: devem ser arrays de strings (podem vir apenas uma das listas)
     const expenseJson =
@@ -64,6 +64,9 @@ export async function PUT(req: NextRequest) {
         ...(thermalWidth && { thermalWidth: thermalWidth === "58" ? "58" : "80" }),
         ...(nuit !== undefined && { nuit: nuit || "" }),
         ...(whatsappLoja !== undefined && { whatsappLoja: typeof whatsappLoja === "string" ? whatsappLoja.trim() : "" }),
+        ...(instagramUrl !== undefined && { instagramUrl: typeof instagramUrl === "string" ? instagramUrl.trim() : "" }),
+        ...(facebookUrl !== undefined && { facebookUrl: typeof facebookUrl === "string" ? facebookUrl.trim() : "" }),
+        ...(tiktokUrl !== undefined && { tiktokUrl: typeof tiktokUrl === "string" ? tiktokUrl.trim() : "" }),
         ...(expenseJson !== undefined && { expenseCategories: expenseJson }),
         ...(productJson !== undefined && { productCategories: productJson }),
         ...(brandJson !== undefined && { productBrands: brandJson }),
@@ -71,6 +74,9 @@ export async function PUT(req: NextRequest) {
       create: {
         id: "main",
         ...(whatsappLoja !== undefined && { whatsappLoja: typeof whatsappLoja === "string" ? whatsappLoja.trim() : "" }),
+        ...(instagramUrl !== undefined && { instagramUrl: typeof instagramUrl === "string" ? instagramUrl.trim() : "" }),
+        ...(facebookUrl !== undefined && { facebookUrl: typeof facebookUrl === "string" ? facebookUrl.trim() : "" }),
+        ...(tiktokUrl !== undefined && { tiktokUrl: typeof tiktokUrl === "string" ? tiktokUrl.trim() : "" }),
       },
     })
     return NextResponse.json({

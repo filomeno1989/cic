@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoginScreen } from "@/components/login";
 import { AppShell, type ViewKey } from "@/components/app-shell";
 import { DashboardView } from "@/components/dashboard-view";
 import { PdvView } from "@/components/pdv-view";
@@ -49,10 +48,12 @@ export default function Home() {
 
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
-    setUser(null);
-    setView("dashboard");
     // limpa também o cookie de sessão no servidor
     void fetch("/api/logout", { method: "POST" }).catch(() => {});
+    // v2.3 camuflagem: o login do pessoal vive em /gestao (cliente nunca o vê;
+    // quem apagar o /loja do endereço cai no portal público da loja).
+    // Navegação dura - a página descarta o resto do estado ao sair.
+    window.location.replace("/gestao");
   };
 
   // ----- Rede + sync -----
@@ -138,7 +139,10 @@ export default function Home() {
   }
 
   if (!user) {
-    return <LoginScreen onLogin={handleLogin} />;
+    // v2.3 CAMUFLAGEM: sem sessão, a raiz NUNCA mostra o ecrã de login -
+    // manda o visitante para o portal público da loja. O pessoal entra
+    // por /gestao (endereço discreto, só conhecido da equipa).
+    return <RedirecionarParaLoja />;
   }
 
   return (
@@ -183,5 +187,19 @@ export default function Home() {
       {/* key p/ forçar remount de relatórios quando vendas mudam */}
       <span data-sales-version={salesVersion} className="hidden" />
     </AppShell>
+  );
+}
+
+/** Sem sessão na raiz: splash discreto + redirecção dura para /loja
+ *  (window.location em vez de router.replace - funciona em qualquer
+ *  contexto: build estático, PWA standalone e browser normal). */
+function RedirecionarParaLoja() {
+  useEffect(() => {
+    window.location.replace("/loja");
+  }, []);
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#faf8f3]">
+      <div className="w-10 h-10 rounded-full border-2 border-[#d4af37] border-t-transparent animate-spin" />
+    </div>
   );
 }

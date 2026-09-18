@@ -230,4 +230,7 @@ model Settings {
   productCategories String  @default("") // JSON array de categorias de produtos
   productBrands     String  @default("") // JSON array de marcas
   whatsappLoja      String  @default("") // WhatsApp CTA do portal do cliente /loja
+  instagramUrl      String  @default("") // link completo do Instagram (redes sociais no /loja)
+  facebookUrl       String  @default("") // link completo do Facebook (redes sociais no /loja)
+  tiktokUrl         String  @default("") // link completo do TikTok (preparado para o futuro)
 }

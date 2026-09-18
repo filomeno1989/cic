@@ -114,6 +114,8 @@ export async function POST(req: NextRequest) {
             phone: s(x.phone), address: s(x.address, "Beira, Moçambique"),
             receiptFooter: s(x.receiptFooter, "Obrigado pela preferência!"), thermalWidth: s(x.thermalWidth, "80"),
             nuit: s(x.nuit),
+            whatsappLoja: s(x.whatsappLoja),
+            instagramUrl: s(x.instagramUrl), facebookUrl: s(x.facebookUrl), tiktokUrl: s(x.tiktokUrl),
             expenseCategories: s(x.expenseCategories),
             productCategories: s(x.productCategories),
             productBrands: s(x.productBrands),

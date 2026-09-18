@@ -244,6 +244,21 @@ export function DefinicoesView({
               <Label className="text-xs">WhatsApp que recebe as encomendas <span className="text-muted-foreground font-normal">- só números</span></Label>
               <Input value={form.whatsappLoja ?? ""} inputMode="tel" onChange={(e) => setForm({ ...form, whatsappLoja: e.target.value.replace(/[^+\d]/g, "") })} placeholder="Ex: 841234567 ou 258841234567" />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <Label className="text-xs">Instagram <span className="text-muted-foreground font-normal">(link completo)</span></Label>
+                <Input value={form.instagramUrl ?? ""} onChange={(e) => setForm({ ...form, instagramUrl: e.target.value.trim() })} placeholder="https://instagram.com/..." />
+              </div>
+              <div>
+                <Label className="text-xs">Facebook <span className="text-muted-foreground font-normal">(link completo)</span></Label>
+                <Input value={form.facebookUrl ?? ""} onChange={(e) => setForm({ ...form, facebookUrl: e.target.value.trim() })} placeholder="https://facebook.com/..." />
+              </div>
+              <div>
+                <Label className="text-xs">TikTok <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+                <Input value={form.tiktokUrl ?? ""} onChange={(e) => setForm({ ...form, tiktokUrl: e.target.value.trim() })} placeholder="https://tiktok.com/@..." />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Os links que preencher aparecem como botões «Siga-nos» no rodapé do portal do cliente.</p>
             <div>
               <Label className="text-xs">Mensagem bonita para enviar aos clientes <span className="text-muted-foreground font-normal">- aparece no topo do portal (em vez de códigos aleatórios)</span></Label>
               <Textarea rows={2} value={waMsg} onChange={(e) => setWaMsg(e.target.value)} placeholder="Ex: Bem-vinda ao nosso catálogo! Novidades toda a semana ✨" />
@@ -273,7 +288,7 @@ export function DefinicoesView({
               </p>
             </div>
             <Button className="btn-gold w-full" onClick={save} disabled={saving}>
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Store className="w-4 h-4 mr-1" /> Guardar WhatsApp do Portal</>}
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Store className="w-4 h-4 mr-1" /> Guardar Portal (WhatsApp + redes sociais)</>}
             </Button>
           </>
         ) : (

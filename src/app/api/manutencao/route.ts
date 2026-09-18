@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { bloqueado, segundosRestantes, registarFalha, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit";
 
 // ============================================================
 // PORTA DE EMERGÊNCIA DO PROPRIETÁRIO - /api/manutencao
@@ -30,6 +31,13 @@ function pinOk(p: unknown): p is string {
 }
 
 export async function POST(req: NextRequest) {
+  const ip = ipDoPedido(req);
+  // Anti força-bruta da chave de recuperação (v2.3): 5 chaves erradas → 15 min de bloqueio
+  if (bloqueado("manutencao", ip)) {
+    const seg = segundosRestantes("manutencao", ip);
+    return NextResponse.json({ error: `${MSG_BLOQUEIO} (${Math.ceil(seg / 60)} min)` }, { status: 429 });
+  }
+
   const KEY = process.env.RECOVERY_KEY;
   // Sem chave configurada (ou fraca demais) a porta nem existe
   if (!KEY || KEY.length < 24) {
@@ -39,6 +47,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const chave = String(body?.chave ?? "");
   if (!chaveValida(chave, KEY)) {
+    registarFalha("manutencao", ip);
     return NextResponse.json({ error: "Chave de manutenção inválida" }, { status: 403 });
   }
 

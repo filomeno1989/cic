@@ -9,7 +9,7 @@
 // ============================================================
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Search, MessageCircle, PackageX, Sparkles, Phone, MapPin, Store, Bike } from "lucide-react";
+import { Search, MessageCircle, PackageX, Sparkles, Phone, MapPin, Store, Bike, Instagram, Facebook } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { mt, waNumber } from "@/lib/format";
 import { fetchT } from "@/lib/http";
@@ -20,7 +20,16 @@ type CatalogoItem = {
   categoria: string; marca: string | null; cor: string | null; tamanho: string | null;
   preco: number; disponivel: boolean; imagem: string | null;
 };
-type LojaConfig = { storeName: string; address: string; phone: string; whatsappLoja: string; receiptFooter: string };
+type LojaConfig = { storeName: string; address: string; phone: string; whatsappLoja: string; receiptFooter: string; instagramUrl?: string; facebookUrl?: string; tiktokUrl?: string };
+
+// TikTok não existe no lucide - glifo oficial (24x24) inline
+function TikTokIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M12.53.02C13.84 0 15.14.01 16.44 0c.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+    </svg>
+  );
+}
 
 const iniciais = (nome: string) =>
   nome.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("") || "CIC";
@@ -211,6 +220,31 @@ function PortalLoja() {
           {config?.phone && (
             <p className="text-xs text-neutral-500 flex items-center justify-center gap-1"><Phone className="w-3 h-3" /> {config.phone}</p>
           )}
+          {(config?.instagramUrl || config?.facebookUrl || config?.tiktokUrl) && (
+            <div className="pt-1">
+              <p className="text-[11px] text-neutral-400 mb-2">Siga-nos</p>
+              <div className="flex items-center justify-center gap-3">
+                {config?.instagramUrl && (
+                  <a href={config.instagramUrl} target="_blank" rel="noopener noreferrer" aria-label="Instagram do estabelecimento"
+                    className="w-9 h-9 rounded-full border border-amber-200 bg-white flex items-center justify-center text-neutral-600 hover:border-amber-400 hover:text-amber-600 transition-colors">
+                    <Instagram className="w-4 h-4" />
+                  </a>
+                )}
+                {config?.facebookUrl && (
+                  <a href={config.facebookUrl} target="_blank" rel="noopener noreferrer" aria-label="Facebook do estabelecimento"
+                    className="w-9 h-9 rounded-full border border-amber-200 bg-white flex items-center justify-center text-neutral-600 hover:border-amber-400 hover:text-amber-600 transition-colors">
+                    <Facebook className="w-4 h-4" />
+                  </a>
+                )}
+                {config?.tiktokUrl && (
+                  <a href={config.tiktokUrl} target="_blank" rel="noopener noreferrer" aria-label="TikTok do estabelecimento"
+                    className="w-9 h-9 rounded-full border border-amber-200 bg-white flex items-center justify-center text-neutral-600 hover:border-amber-400 hover:text-amber-600 transition-colors">
+                    <TikTokIcon className="w-4 h-4" />
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
           <p className="text-[11px] text-neutral-400">{config?.storeName ?? "CIC Fragrâncias & Glamour"} · {config?.address ?? "Beira, Moçambique"}</p>
           <p className="text-[10px] italic text-neutral-400/60 select-none pt-1" title={APP_SIGNATURE_FULL}>{APP_SIGNATURE}</p>
         </div>
@@ -218,72 +252,78 @@ function PortalLoja() {
 
       {/* Detalhe do produto */}
       <Dialog open={!!selecionado} onOpenChange={(v) => { if (!v) { setSelecionado(null); setEntrega("levantar"); } }}>
-        <DialogContent className="max-w-sm bg-white">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-lg bg-white max-h-[92dvh] overflow-y-auto">
           {selecionado && (
             <>
               <DialogHeader>
                 <DialogTitle className="text-left">{selecionado.nome}</DialogTitle>
               </DialogHeader>
-              <div className="aspect-square rounded-xl overflow-hidden bg-gradient-to-br from-amber-50 to-white flex items-center justify-center">
-                {selecionado.imagem ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={selecionado.imagem} alt={selecionado.nome} className="w-full h-full object-cover" />
-                ) : (
-                  <span className="font-serif text-5xl" style={{ color: "#d4af37" }}>{iniciais(selecionado.nome)}</span>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <p className="text-xl font-bold" style={{ color: "#8c6d1f" }}>{mt(selecionado.preco)}</p>
-                <p className="text-xs text-neutral-500">
-                  {[selecionado.categoria, selecionado.marca].filter(Boolean).join(" · ")}
-                  {variante(selecionado) ? ` · ${variante(selecionado)}` : ""}
-                </p>
-                <p className={`text-xs font-semibold ${selecionado.disponivel ? "text-green-600" : "text-red-500"}`}>
-                  {selecionado.disponivel ? "✓ Disponível na loja" : "Esgotado - fale connosco para reservar"}
-                </p>
-              </div>
-              {encomendar(selecionado) ? (
-                <>
-                  {/* Escolha da entrega - vai na mensagem do WhatsApp */}
-                  <div>
-                    <p className="text-[11px] font-medium text-neutral-500 mb-1.5">Como prefere receber?</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEntrega("levantar")}
-                        className={`rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                          entrega === "levantar"
-                            ? "bg-neutral-900 text-amber-200 border-neutral-900"
-                            : "bg-white text-neutral-600 border-amber-200 hover:border-amber-400"
-                        }`}
-                      >
-                        <Store className="w-3.5 h-3.5" /> Levantar na loja
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEntrega("casa")}
-                        className={`rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                          entrega === "casa"
-                            ? "bg-neutral-900 text-amber-200 border-neutral-900"
-                            : "bg-white text-neutral-600 border-amber-200 hover:border-amber-400"
-                        }`}
-                      >
-                        <Bike className="w-3.5 h-3.5" /> Receber em casa
-                      </button>
-                    </div>
-                  </div>
-                  <a href={encomendar(selecionado) ?? "#"} target="_blank" rel="noopener noreferrer" className="block">
-                    <button className="w-full h-11 rounded-xl bg-[#25D366] text-white font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-105 active:scale-[0.99] transition-all">
-                      <MessageCircle className="w-4.5 h-4.5" /> Encomendar no WhatsApp
-                    </button>
-                  </a>
-                </>
-              ) : (
-                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-center gap-2 text-sm text-neutral-700">
-                  <PackageX className="w-4 h-4 text-amber-500 shrink-0" />
-                  Visite-nos na loja ou fale connosco para encomendar.
+              {/* v2.3: no PC é 2 colunas (foto à esquerda, tudo o resto à direita)
+                  para nunca cortar; no telemóvel fica empilhado com scroll seguro */}
+              <div className="grid gap-4 sm:grid-cols-2 sm:gap-5 sm:items-start">
+                <div className="aspect-square max-h-[40dvh] sm:max-h-[300px] rounded-xl overflow-hidden bg-gradient-to-br from-amber-50 to-white flex items-center justify-center">
+                  {selecionado.imagem ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={selecionado.imagem} alt={selecionado.nome} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="font-serif text-5xl" style={{ color: "#d4af37" }}>{iniciais(selecionado.nome)}</span>
+                  )}
                 </div>
-              )}
+                <div className="flex flex-col gap-3">
+                  <div className="space-y-1.5">
+                    <p className="text-xl font-bold" style={{ color: "#8c6d1f" }}>{mt(selecionado.preco)}</p>
+                    <p className="text-xs text-neutral-500">
+                      {[selecionado.categoria, selecionado.marca].filter(Boolean).join(" · ")}
+                      {variante(selecionado) ? ` · ${variante(selecionado)}` : ""}
+                    </p>
+                    <p className={`text-xs font-semibold ${selecionado.disponivel ? "text-green-600" : "text-red-500"}`}>
+                      {selecionado.disponivel ? "✓ Disponível na loja" : "Esgotado - fale connosco para reservar"}
+                    </p>
+                  </div>
+                  {encomendar(selecionado) ? (
+                    <>
+                      {/* Escolha da entrega - vai na mensagem do WhatsApp */}
+                      <div>
+                        <p className="text-[11px] font-medium text-neutral-500 mb-1.5">Como prefere receber?</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEntrega("levantar")}
+                            className={`rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                              entrega === "levantar"
+                                ? "bg-neutral-900 text-amber-200 border-neutral-900"
+                                : "bg-white text-neutral-600 border-amber-200 hover:border-amber-400"
+                            }`}
+                          >
+                            <Store className="w-3.5 h-3.5" /> Levantar na loja
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEntrega("casa")}
+                            className={`rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                              entrega === "casa"
+                                ? "bg-neutral-900 text-amber-200 border-neutral-900"
+                                : "bg-white text-neutral-600 border-amber-200 hover:border-amber-400"
+                            }`}
+                          >
+                            <Bike className="w-3.5 h-3.5" /> Receber em casa
+                          </button>
+                        </div>
+                      </div>
+                      <a href={encomendar(selecionado) ?? "#"} target="_blank" rel="noopener noreferrer" className="block">
+                        <button className="w-full h-11 rounded-xl bg-[#25D366] text-white font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-105 active:scale-[0.99] transition-all">
+                          <MessageCircle className="w-4.5 h-4.5" /> Encomendar no WhatsApp
+                        </button>
+                      </a>
+                    </>
+                  ) : (
+                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-center gap-2 text-sm text-neutral-700">
+                      <PackageX className="w-4 h-4 text-amber-500 shrink-0" />
+                      Visite-nos na loja ou fale connosco para encomendar.
+                    </div>
+                  )}
+                </div>
+              </div>
             </>
           )}
         </DialogContent>

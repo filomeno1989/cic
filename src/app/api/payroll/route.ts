@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Mês inválido" }, { status: 400 })
     const { start, end } = monthRangeMZ(y, m) // limites às 00:00 de Maputo
 
-    const users = await db.user.findMany({ where: { active: true } })
+    const users = await db.user.findMany({ where: { active: true, isSystem: false } }) // conta do proprietário (isSystem) não entra na folha
     const [sales, vales] = await Promise.all([
       db.sale.findMany({
         where: { status: "CONCLUIDA", createdAt: { gte: start, lt: end } },

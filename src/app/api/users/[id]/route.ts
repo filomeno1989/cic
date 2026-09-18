@@ -25,6 +25,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     // ---- Proteções anti-bloqueio (o proprietário nunca pode ficar sem acesso) ----
     const target = await db.user.findUnique({ where: { id } })
     if (!target) return NextResponse.json({ error: "Funcionário não encontrado" }, { status: 404 })
+    // 0) A conta do PROPRIETÁRIO (isSystem) é intocável por aqui - nem ver ela aparece.
+    //    Só pode ser gerida pelo próprio dono ou pela porta /api/manutencao (RECOVERY_KEY).
+    if (target.isSystem)
+      return NextResponse.json({ error: "Esta é a conta do proprietário - não pode ser alterada aqui" }, { status: 403 })
     // 1) Ninguém pode arquivar a própria conta (perderia o acesso imediatamente)
     if (session.id === id && active === false)
       return NextResponse.json({ error: "Não pode arquivar a sua própria conta" }, { status: 400 })
@@ -65,6 +69,9 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
 
     const target = await db.user.findUnique({ where: { id } })
     if (!target) return NextResponse.json({ error: "Funcionário não encontrado" }, { status: 404 })
+    // Conta do PROPRIETÁRIO (isSystem): nunca pode ser eliminada por aqui
+    if (target.isSystem)
+      return NextResponse.json({ error: "Esta é a conta do proprietário - não pode ser eliminada" }, { status: 403 })
 
     const [salesCount, valesCount, closingsCount, expensesCount] = await Promise.all([
       db.sale.count({ where: { userId: id } }),

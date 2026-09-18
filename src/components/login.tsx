@@ -3,16 +3,34 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Delete, Loader2, Lock, Sparkles } from "lucide-react";
+import { Delete, Loader2, Lock, KeyRound, Sparkles, ArrowLeft } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
+import { fetchT } from "@/lib/http";
 import type { SessionUser } from "@/lib/types";
+
+type LoginUser = { id: string; name: string; role: string };
+
+const initials = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
 
 export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void }) {
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const { toast } = useToast();
+
+  // Cartões de utilizador (Netflix-style). A conta do proprietário (isSystem)
+  // NUNCA vem nesta lista - o dono entra pelo "Acesso por código".
+  const [users, setUsers] = useState<LoginUser[]>([]);
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const [selected, setSelected] = useState<LoginUser | null>(null);
+  const [codeMode, setCodeMode] = useState(false); // modo privado: só teclado, sem cartões
 
   // Primeiro acesso: base de dados nova (ex: Supabase no Vercel) sem utilizadores
   const [setupNeeded, setSetupNeeded] = useState(false);
@@ -25,10 +43,19 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/setup");
+        const res = await fetchT("/api/setup");
         const data = await res.json().catch(() => ({}));
         setSetupNeeded(!!data.needed);
       } catch { /* offline - assume que não precisa */ }
+      try {
+        const res = await fetchT("/api/login-users");
+        const list: LoginUser[] = await res.json().catch(() => []);
+        setUsers(Array.isArray(list) ? list : []);
+      } catch {
+        setUsers([]); // falha → só "Acesso por código"
+      } finally {
+        setUsersLoaded(true);
+      }
     })();
     return () => { if (submitTimer.current) window.clearTimeout(submitTimer.current); };
   }, []);
@@ -37,10 +64,10 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
     setLoading(true);
     setError(false);
     try {
-      const res = await fetch("/api/login", {
+      const res = await fetchT("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: value }),
+        body: JSON.stringify(selected ? { pin: value, userId: selected.id } : { pin: value }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -77,11 +104,33 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
     setError(false);
   };
 
+  const pick = (u: LoginUser) => {
+    if (submitTimer.current) window.clearTimeout(submitTimer.current);
+    setPin("");
+    setError(false);
+    setSelected((cur) => (cur?.id === u.id ? null : u));
+  };
+
+  const enterCodeMode = () => {
+    if (submitTimer.current) window.clearTimeout(submitTimer.current);
+    setPin("");
+    setError(false);
+    setSelected(null);
+    setCodeMode(true);
+  };
+
+  const leaveCodeMode = () => {
+    if (submitTimer.current) window.clearTimeout(submitTimer.current);
+    setPin("");
+    setError(false);
+    setCodeMode(false);
+  };
+
   const doSetup = async () => {
     if (!setupName.trim() || setupPin.length < 4) return;
     setSetupLoading(true);
     try {
-      const res = await fetch("/api/setup", {
+      const res = await fetchT("/api/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: setupName.trim(), pin: setupPin, phone: setupPhone }),
@@ -97,16 +146,23 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
     }
   };
 
+  const showCards = !codeMode && usersLoaded && users.length > 0;
+  const hint = codeMode
+    ? "Digite o seu código de acesso"
+    : selected
+      ? `PIN de ${selected.name}`
+      : "Toque no seu nome · PIN de 4 a 6 dígitos";
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] relative overflow-hidden p-4">
       {/* brilho dourado de fundo */}
       <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 60% 40% at 50% 30%, rgba(212,175,55,0.12), transparent)" }} />
-      <div className="w-full max-w-sm relative fade-up">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-36 h-36 rounded-full overflow-hidden bg-black flex items-center justify-center border border-[#d4af37]/40 pulse-gold">
-            <Image src="/logo-cic.png" alt="CIC Fragrâncias & Glamour" width={130} height={130} className="object-contain" priority />
+      <div className="w-full max-w-md relative fade-up">
+        <div className="flex flex-col items-center mb-7">
+          <div className="w-32 h-32 rounded-full overflow-hidden bg-black flex items-center justify-center border border-[#d4af37]/40 pulse-gold">
+            <Image src="/logo-cic.png" alt="CIC Fragrâncias & Glamour" width={116} height={116} className="object-contain" priority />
           </div>
-          <h1 className="mt-5 text-2xl font-serif gold-text tracking-wide">CIC Fragrâncias & Glamour</h1>
+          <h1 className="mt-4 text-2xl font-serif gold-text tracking-wide">CIC Fragrâncias & Glamour</h1>
           <p className="text-[#a1a1aa] text-sm mt-1 flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5" /> Sistema de Gestão · Beira, Moçambique
           </p>
@@ -153,9 +209,60 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
             </Button>
           </div>
         ) : (
-          /* ---------- Teclado de PIN normal ---------- */
+          /* ---------- Login com cartões + PIN ---------- */
           <div className="bg-[#141414] border border-[#d4af37]/25 rounded-2xl p-6 shadow-2xl">
-            <div className="flex justify-center gap-3 mb-2 h-4">
+            {showCards && (
+              <div className="flex flex-wrap justify-center gap-4 mb-5">
+                {users.map((u) => {
+                  const isSel = selected?.id === u.id;
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => pick(u)}
+                      className={`group flex flex-col items-center gap-1.5 rounded-xl px-3 py-2.5 transition-all ${
+                        isSel ? "bg-[#2a2310] ring-2 ring-[#d4af37]" : "hover:bg-[#1c1c1c]"
+                      }`}
+                    >
+                      <span
+                        className={`w-14 h-14 rounded-full flex items-center justify-center font-serif text-lg transition-all ${
+                          isSel
+                            ? "bg-[#d4af37] text-black border-2 border-[#d4af37]"
+                            : "bg-[#1c1c1c] text-[#e9d9a8] border-2 border-[#3f3f46] group-hover:border-[#d4af37]/60"
+                        }`}
+                      >
+                        {initials(u.name)}
+                      </span>
+                      <span className={`text-xs font-medium leading-tight ${isSel ? "text-[#e9d9a8]" : "text-zinc-300"}`}>
+                        {u.name}
+                      </span>
+                      <span
+                        className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
+                          u.role === "GERENTE"
+                            ? "text-[#d4af37] border-[#d4af37]/50"
+                            : "text-zinc-500 border-zinc-700"
+                        }`}
+                      >
+                        {u.role === "GERENTE" ? "Gerente" : "Caixa"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {codeMode && (
+              <button
+                type="button"
+                onClick={leaveCodeMode}
+                className="flex items-center gap-1 text-xs text-[#a1a1aa] hover:text-[#d4af37] mb-3"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Voltar aos utilizadores
+              </button>
+            )}
+
+            <p className="text-center text-[11px] text-[#a1a1aa] mb-2">{hint}</p>
+            <div className="flex justify-center gap-3 mb-4 h-4">
               {/* Bolinhas dinâmicas: começam em 4 e crescem até 6 conforme se digita -
                   comunica visualmente que o PIN pode ter 4, 5 ou 6 dígitos */}
               {Array.from({ length: Math.min(6, Math.max(4, pin.length)) }).map((_, i) => (
@@ -167,7 +274,6 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
                 />
               ))}
             </div>
-            <p className="text-center text-[11px] text-[#a1a1aa] mb-4">PIN de 4 a 6 dígitos</p>
 
             <div className="grid grid-cols-3 gap-3">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
@@ -204,6 +310,18 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
               <div className="flex justify-center mt-5 text-[#d4af37]">
                 <Loader2 className="w-5 h-5 animate-spin" />
               </div>
+            )}
+
+            {/* Acesso discreto por código - o dono digita o PIN dele sem escolher
+                ninguém e o sistema reconhece a conta (nem aparece nos cartões). */}
+            {!codeMode && (
+              <button
+                type="button"
+                onClick={enterCodeMode}
+                className="w-full flex items-center justify-center gap-1.5 text-xs text-[#52525b] hover:text-[#d4af37] mt-5 transition-colors"
+              >
+                <KeyRound className="w-3.5 h-3.5" /> Acesso por código
+              </button>
             )}
           </div>
         )}

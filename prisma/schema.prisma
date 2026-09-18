@@ -1,6 +1,3 @@
-// ⚠️ REPO/VERCEL: este ficheiro TEM de ser PostgreSQL (url + directUrl).
-// NAO substituir pelo schema sqlite do ambiente local!
-// O ambiente local usa provider "sqlite" - mantenha os DOIS sincronizados quanto ao resto.
 generator client {
   provider = "prisma-client-js"
 }
@@ -18,6 +15,7 @@ model User {
   pin           String // PIN de acesso (4-6 digitos)
   role          String        @default("CAIXA") // GERENTE | CAIXA
   active        Boolean       @default(true)
+  isSystem      Boolean       @default(false) // conta do proprietário (Manutenção): invisível na RH e intocável por gerentes
   phone         String?
   baseSalary    Float         @default(0)
   commissionPct Float         @default(0) // % comissao sobre vendas

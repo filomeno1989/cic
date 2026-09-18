@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { mt, fmtDateTime, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/format";
+import { fetchT } from "@/lib/http";
 import type { SessionUser } from "@/lib/types";
 import { Receipt, LockKeyhole, Loader2, TrendingDown, CheckCircle2, XCircle, Settings2, Plus, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -29,23 +30,26 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
   const [closings, setClosings] = useState<Closing[]>([]);
   const [form, setForm] = useState({ category: DEFAULT_EXPENSE_CATEGORIES[0], description: "", amount: "" });
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false); // trava anti-duplo-clique (mesma cura do stock duplicado)
 
   // Gestor de despesas fixas (categorias)
   const [categories, setCategories] = useState<string[]>(DEFAULT_EXPENSE_CATEGORIES);
   const [catOpen, setCatOpen] = useState(false);
   const [newCat, setNewCat] = useState("");
   const [catSaving, setCatSaving] = useState(false);
+  const catSavingRef = useRef(false);
 
   // Fecho cego
   const [closeForm, setCloseForm] = useState({ cash: "", pos: "", mpesa: "", note: "" });
   const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
   const [closeResult, setCloseResult] = useState<{ closedAt: string; message: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
       const [eRes, cRes] = await Promise.all([
-        fetch("/api/expenses?limit=60"),
-        fetch("/api/closings"), // papel e userId vêm da sessão no servidor
+        fetchT("/api/expenses?limit=60"),
+        fetchT("/api/closings"), // papel e userId vêm da sessão no servidor
       ]);
       if (eRes.ok) setExpenses(await eRes.json());
       if (cRes.ok) setClosings(await cRes.json());
@@ -58,7 +62,7 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/settings");
+        const res = await fetchT("/api/settings");
         if (!res.ok) return;
         const data = await res.json();
         if (Array.isArray(data.expenseCategories) && data.expenseCategories.length > 0) {
@@ -70,9 +74,11 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
   }, []);
 
   const persistCategories = async (list: string[]) => {
+    if (catSavingRef.current) return; // DUPLO-CLIQUE BLOQUEADO
     setCatSaving(true);
+    catSavingRef.current = true;
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetchT("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expenseCategories: list }),
@@ -86,6 +92,7 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Erro ao guardar categorias", variant: "destructive" });
     } finally {
+      catSavingRef.current = false;
       setCatSaving(false);
     }
   };
@@ -108,34 +115,42 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
   };
 
   const addExpense = async () => {
+    if (savingRef.current) return; // DUPLO-CLIQUE BLOQUEADO
     const amount = parseFloat(form.amount);
     if (!amount || amount <= 0) {
       toast({ title: "Valor inválido", variant: "destructive" });
       return;
     }
     setSaving(true);
+    savingRef.current = true;
     try {
-      const res = await fetch("/api/expenses", {
+      const res = await fetchT("/api/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, amount, userId: user.id }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Erro ao registar despesa");
+      }
       toast({ title: "Despesa registada", description: `${form.category} - ${mt(amount)}` });
       setForm({ category: categories.includes(form.category) ? form.category : categories[0], description: "", amount: "" });
       load();
       onDataChanged();
-    } catch {
-      toast({ title: "Erro ao registar despesa", variant: "destructive" });
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro de rede - verifique a internet e tente de novo", variant: "destructive" });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const doClosing = async () => {
+    if (closingRef.current) return; // DUPLO-CLIQUE BLOQUEADO - fecho duplicado seria grave
     setClosing(true);
+    closingRef.current = true;
     try {
-      const res = await fetch("/api/closings", {
+      const res = await fetchT("/api/closings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -159,6 +174,7 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
         toast({ title: e instanceof Error ? e.message : "Erro no fecho", variant: "destructive" });
       }
     } finally {
+      closingRef.current = false;
       setClosing(false);
     }
   };
@@ -290,7 +306,7 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
                     <Textarea rows={2} value={closeForm.note} onChange={(e) => setCloseForm({ ...closeForm, note: e.target.value })} placeholder="Ex: troco ficou curto, cliente fica de dever…" />
                   </div>
                   <Button className="btn-gold w-full h-11" onClick={doClosing} disabled={closing || !online}>
-                    {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Fechar Turno"}
+                    {closing ? <><Loader2 className="w-4 h-4 animate-spin" /> A fechar...</> : "Fechar Turno"}
                   </Button>
                   {!online && <p className="text-xs text-amber-600 text-center">O fecho de caixa exige ligação ao servidor.</p>}
                 </div>

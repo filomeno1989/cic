@@ -125,7 +125,8 @@ export async function POST(req: NextRequest) {
           data: {
             id: s(u.id), name: s(u.name), pin: s(u.pin),
             role: u.role === "GERENTE" ? "GERENTE" : "CAIXA",
-            active: u.active !== false, phone: (u.phone as string | null) ?? null,
+            active: u.active !== false, isSystem: u.isSystem === true,
+            phone: (u.phone as string | null) ?? null,
             baseSalary: n(u.baseSalary), commissionPct: n(u.commissionPct),
             createdAt: d(u.createdAt) ?? new Date(), updatedAt: new Date(),
           },

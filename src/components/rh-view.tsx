@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { mt, fmtDate, fmtDateTime } from "@/lib/format";
+import { fetchT } from "@/lib/http";
 import type { SessionUser } from "@/lib/types";
 import { UserPlus, HandCoins, Loader2, Trash2, FileSpreadsheet, Users2, Pencil, Archive, ArchiveRestore } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -36,17 +37,19 @@ export function RhView({ user }: { user: SessionUser }) {
   const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
   const [empForm, setEmpForm] = useState({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", phone: "" });
   const [savingEmp, setSavingEmp] = useState(false);
+  const savingEmpRef = useRef(false); // trava anti-duplo-clique (mesma cura do stock duplicado)
 
   const [valeOpen, setValeOpen] = useState(false);
   const [valeForm, setValeForm] = useState({ userId: "", amount: "", reason: "" });
   const [savingVale, setSavingVale] = useState(false);
+  const savingValeRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
       const [uRes, vRes, pRes] = await Promise.all([
-        fetch("/api/users"),
-        fetch("/api/vales"),
-        fetch(`/api/payroll?month=${month}`),
+        fetchT("/api/users"),
+        fetchT("/api/vales"),
+        fetchT(`/api/payroll?month=${month}`),
       ]);
       if (uRes.ok) setEmployees(await uRes.json());
       if (vRes.ok) setVales(await vRes.json());
@@ -69,6 +72,7 @@ export function RhView({ user }: { user: SessionUser }) {
   };
 
   const saveEmp = async () => {
+    if (savingEmpRef.current) return; // DUPLO-CLIQUE BLOQUEADO
     if (!empForm.name.trim()) {
       toast({ title: "Nome obrigatório", variant: "destructive" });
       return;
@@ -78,6 +82,7 @@ export function RhView({ user }: { user: SessionUser }) {
       return;
     }
     setSavingEmp(true);
+    savingEmpRef.current = true;
     try {
       const payload: Record<string, unknown> = {
         name: empForm.name,
@@ -88,8 +93,8 @@ export function RhView({ user }: { user: SessionUser }) {
         ...(empForm.pin ? { pin: empForm.pin } : {}),
       };
       const res = editingEmp
-        ? await fetch(`/api/users/${editingEmp.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        : await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        ? await fetchT(`/api/users/${editingEmp.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        : await fetchT("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? "Erro");
@@ -100,31 +105,38 @@ export function RhView({ user }: { user: SessionUser }) {
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Erro", variant: "destructive" });
     } finally {
+      savingEmpRef.current = false;
       setSavingEmp(false);
     }
   };
 
   const addVale = async () => {
+    if (savingValeRef.current) return; // DUPLO-CLIQUE BLOQUEADO
     const amount = parseFloat(valeForm.amount);
     if (!valeForm.userId || !amount || amount <= 0) {
       toast({ title: "Selecione funcionário e valor válido", variant: "destructive" });
       return;
     }
     setSavingVale(true);
+    savingValeRef.current = true;
     try {
-      const res = await fetch("/api/vales", {
+      const res = await fetchT("/api/vales", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: valeForm.userId, amount, reason: valeForm.reason }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Erro ao registar vale");
+      }
       toast({ title: "Vale registado", description: `${mt(amount)} de adiantamento` });
       setValeOpen(false);
       setValeForm({ userId: "", amount: "", reason: "" });
       load();
-    } catch {
-      toast({ title: "Erro ao registar vale", variant: "destructive" });
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro de rede - verifique a internet", variant: "destructive" });
     } finally {
+      savingValeRef.current = false;
       setSavingVale(false);
     }
   };
@@ -132,7 +144,7 @@ export function RhView({ user }: { user: SessionUser }) {
   const deleteVale = async (id: string) => {
     if (!confirm("Eliminar este vale?")) return;
     try {
-      const res = await fetch(`/api/vales/${id}`, {
+      const res = await fetchT(`/api/vales/${id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
       });
@@ -150,7 +162,7 @@ export function RhView({ user }: { user: SessionUser }) {
   // ---- Gestão de funcionários: arquivar / restaurar / eliminar ----
   const setEmpActive = async (e: Employee, active: boolean) => {
     try {
-      const res = await fetch(`/api/users/${e.id}`, {
+      const res = await fetchT(`/api/users/${e.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active }),
@@ -170,7 +182,7 @@ export function RhView({ user }: { user: SessionUser }) {
   const removeEmployee = async (e: Employee) => {
     if (!confirm(`Eliminar definitivamente «${e.name}»?\n\nSó é possível se NUNCA teve vendas, vales ou fechos. Caso contrário, use «Arquivar».`)) return;
     try {
-      const res = await fetch(`/api/users/${e.id}`, {
+      const res = await fetchT(`/api/users/${e.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -379,7 +391,7 @@ export function RhView({ user }: { user: SessionUser }) {
             </div>
             <div><Label className="text-xs">Telefone</Label><Input value={empForm.phone} onChange={(e) => setEmpForm({ ...empForm, phone: e.target.value })} placeholder="+258 84 000 0000" /></div>
             <Button className="btn-gold w-full" onClick={saveEmp} disabled={savingEmp}>
-              {savingEmp ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}
+              {savingEmp ? <><Loader2 className="w-4 h-4 animate-spin" /> A guardar...</> : "Guardar"}
             </Button>
           </div>
         </DialogContent>
@@ -404,7 +416,7 @@ export function RhView({ user }: { user: SessionUser }) {
             <div><Label className="text-xs">Valor (MT) *</Label><Input type="number" value={valeForm.amount} onChange={(e) => setValeForm({ ...valeForm, amount: e.target.value })} /></div>
             <div><Label className="text-xs">Motivo</Label><Input value={valeForm.reason} onChange={(e) => setValeForm({ ...valeForm, reason: e.target.value })} placeholder="Ex: transporte, emergência familiar" /></div>
             <Button className="btn-gold w-full" onClick={addVale} disabled={savingVale}>
-              {savingVale ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registar Vale"}
+              {savingVale ? <><Loader2 className="w-4 h-4 animate-spin" /> A registar...</> : "Registar Vale"}
             </Button>
           </div>
         </DialogContent>

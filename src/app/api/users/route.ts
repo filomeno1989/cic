@@ -3,9 +3,11 @@ import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 
 // GET /api/users - lista funcionários (com estatísticas p/ RH)
+// A conta do proprietário (isSystem) NUNCA aparece aqui - invisível na RH.
 export async function GET() {
   try {
     const users = await db.user.findMany({
+      where: { isSystem: false },
       orderBy: { name: "asc" },
       select: {
         id: true, name: true, role: true, active: true, phone: true,
@@ -39,6 +41,7 @@ export async function POST(req: NextRequest) {
         baseSalary: Number(baseSalary) || 0,
         commissionPct: Number(commissionPct) || 0,
         phone: phone || null,
+        isSystem: false, // contas criadas na RH nunca são de sistema
       },
     })
     return NextResponse.json(user)

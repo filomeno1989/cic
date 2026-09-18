@@ -3,12 +3,20 @@ import { db } from "@/lib/db";
 import { signToken, cookieOptions, SESSION_COOKIE } from "@/lib/session";
 
 // POST /api/login - autenticação por PIN (define cookie de sessão assinado)
+// Com userId: valida o PIN DESSE utilizador (cartões do ecrã de login).
+// Sem userId: procura o PIN em TODAS as contas activas - inclui a do
+// proprietário (isSystem), que não aparece nos cartões nem na RH. É o
+// "Acesso por código" do dono no ecrã de entrada.
 export async function POST(req: NextRequest) {
   try {
-    const { pin } = await req.json()
+    const { pin, userId } = await req.json()
     if (!pin) return NextResponse.json({ error: "PIN obrigatório" }, { status: 400 })
     const user = await db.user.findFirst({
-      where: { pin: String(pin), active: true },
+      where: {
+        pin: String(pin),
+        active: true,
+        ...(userId ? { id: String(userId) } : {}),
+      },
       select: {
         id: true, name: true, role: true, commissionPct: true,
         baseSalary: true, phone: true,

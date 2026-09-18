@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { mt, fmtDate, fmtDateTime, waLink, methodLabel, PAYMENT_METHODS } from "@/lib/format";
+import { fetchT } from "@/lib/http";
 import type { CustomerFlat, SessionUser } from "@/lib/types";
 import { Search, UserPlus, Phone, HandCoins, History, Loader2, Wallet, MessageCircle, Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +30,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
   const [editing, setEditing] = useState<CustomerFlat | null>(null);
   const [form, setForm] = useState({ name: "", phone: "", creditLimit: "", notes: "" });
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false); // trava anti-duplo-clique (mesma cura do stock duplicado)
 
   // Detalhe
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
@@ -39,6 +41,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
   const [amortOpen, setAmortOpen] = useState(false);
   const [amortForm, setAmortForm] = useState({ amount: "", method: "DINHEIRO", note: "" });
   const [amortSaving, setAmortSaving] = useState(false);
+  const amortSavingRef = useRef(false);
 
   // Gestão (gerente): arquivados
   const isManager = user.role === "GERENTE";
@@ -47,7 +50,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/customers${showArchived ? "?archived=1" : ""}`);
+      const res = await fetchT(`/api/customers${showArchived ? "?archived=1" : ""}`);
       if (res.ok) setClients(await res.json());
     } catch { /* offline */ } finally {
       setLoading(false);
@@ -77,30 +80,36 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
   };
 
   const save = async () => {
+    if (savingRef.current) return; // já está a gravar - DUPLO-CLIQUE BLOQUEADO
     if (!form.name.trim()) {
       toast({ title: "Nome obrigatório", variant: "destructive" });
       return;
     }
     setSaving(true);
+    savingRef.current = true;
     try {
       const res = editing
-        ? await fetch(`/api/customers/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) })
-        : await fetch("/api/customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-      if (!res.ok) throw new Error();
+        ? await fetchT(`/api/customers/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) })
+        : await fetchT("/api/customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Erro ao guardar cliente");
+      }
       toast({ title: editing ? "Cliente atualizado" : "Cliente registado" });
       setFormOpen(false);
       load();
       onClientsChanged();
-    } catch {
-      toast({ title: "Erro ao guardar cliente", variant: "destructive" });
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro de rede - verifique a internet e tente de novo", variant: "destructive" });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const openDetail = async (c: CustomerFlat) => {
     try {
-      const res = await fetch(`/api/customers/${c.id}`);
+      const res = await fetchT(`/api/customers/${c.id}`);
       if (!res.ok) throw new Error();
       const data: CustomerDetail = await res.json();
       setDetail(data);
@@ -117,6 +126,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
   };
 
   const amortize = async () => {
+    if (amortSavingRef.current) return; // DUPLO-CLIQUE BLOQUEADO
     if (!amortTarget) return;
     const amount = parseFloat(amortForm.amount);
     if (!amount || amount <= 0) {
@@ -124,21 +134,26 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
       return;
     }
     setAmortSaving(true);
+    amortSavingRef.current = true;
     try {
-      const res = await fetch(`/api/customers/${amortTarget.id}/amortize`, {
+      const res = await fetchT(`/api/customers/${amortTarget.id}/amortize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...amortForm, amount, userId: user.id }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Erro ao registar amortização");
+      }
       toast({ title: "Amortização registada", description: `${mt(amount)} - fiação de ${amortTarget.name} reduzida.` });
       setAmortOpen(false);
       load();
       onClientsChanged();
       if (detailOpen && detail?.id === amortTarget.id) openDetail(amortTarget);
-    } catch {
-      toast({ title: "Erro ao registar amortização", variant: "destructive" });
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro de rede - verifique a internet", variant: "destructive" });
     } finally {
+      amortSavingRef.current = false;
       setAmortSaving(false);
     }
   };
@@ -146,7 +161,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
   // ---- Gestão: arquivar / restaurar / eliminar (só gerente) ----
   const setArchived = async (c: CustomerFlat, active: boolean) => {
     try {
-      const res = await fetch(`/api/customers/${c.id}`, {
+      const res = await fetchT(`/api/customers/${c.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active }),
@@ -164,7 +179,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
   const removeCustomer = async (c: CustomerFlat) => {
     if (!confirm(`Eliminar definitivamente «${c.name}»?\n\nSó é possível se o cliente NUNCA teve compras nem amortizações. Caso contrário, use «Arquivar».`)) return;
     try {
-      const res = await fetch(`/api/customers/${c.id}`, {
+      const res = await fetchT(`/api/customers/${c.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -306,7 +321,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
             <div><Label className="text-xs">Limite de fiação (MT)</Label><Input type="number" value={form.creditLimit} onChange={(e) => setForm({ ...form, creditLimit: e.target.value })} placeholder="2000" /></div>
             <div><Label className="text-xs">Notas (tom preferido, alergias…)</Label><Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Ex: usa Tom 220, prefere perfume doce" /></div>
             <Button className="btn-gold w-full" onClick={save} disabled={saving}>
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> A guardar...</> : "Guardar"}
             </Button>
           </div>
         </DialogContent>
@@ -398,7 +413,7 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
             </div>
             <div><Label className="text-xs">Nota</Label><Input value={amortForm.note} onChange={(e) => setAmortForm({ ...amortForm, note: e.target.value })} placeholder="Ex: promete o resto na próxima semana" /></div>
             <Button className="btn-gold w-full" onClick={amortize} disabled={amortSaving}>
-              {amortSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registar Amortização"}
+              {amortSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> A registar...</> : "Registar Amortização"}
             </Button>
           </div>
         </DialogContent>

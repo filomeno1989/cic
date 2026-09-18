@@ -8,6 +8,7 @@ CREATE TABLE "User" (
     "pin" TEXT NOT NULL,
     "role" TEXT NOT NULL DEFAULT 'CAIXA',
     "active" BOOLEAN NOT NULL DEFAULT true,
+    "isSystem" BOOLEAN NOT NULL DEFAULT false,
     "phone" TEXT,
     "baseSalary" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "commissionPct" DOUBLE PRECISION NOT NULL DEFAULT 0,

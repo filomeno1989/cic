@@ -12,10 +12,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { mt, fmtDate, daysUntil, variantLabel, LOSS_REASONS, DEFAULT_PRODUCT_CATEGORIES, DEFAULT_PRODUCT_BRANDS } from "@/lib/format";
 import type { ProductVariantFlat, SessionUser } from "@/lib/types";
 import {
-  Plus, Save, PackagePlus, AlertTriangle, CalendarClock, Trash2, Search, Loader2, X, Tags, Download, Check, Award,
+  Plus, Save, PackagePlus, AlertTriangle, CalendarClock, Trash2, Search, Loader2, X, Tags, Download, Check, Award, Image as ImageIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { fetchT } from "@/lib/http";
+import { ficheiroParaJpeg, type ImagemPayload } from "@/lib/imagem";
 
 type VariantDraft = {
   id?: string; color: string; size: string; costPrice: string; retailPrice: string;
@@ -42,6 +43,16 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   const [variants, setVariants] = useState<VariantDraft[]>([emptyVariant()]);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false); // trava duplo-clique no MESMO tick
+
+  // P2: foto do produto (guardada no Supabase, mostrada no catálogo e no portal)
+  const [imgPreview, setImgPreview] = useState<string | null>(null);
+  const [imgPayload, setImgPayload] = useState<ImagemPayload | null>(null);
+  const [imgRemoved, setImgRemoved] = useState(false);
+  const imgInputRef = useRef<HTMLInputElement>(null);
+
+  // P2: sugestão automática de código livre (ex: "CART" → "CART 05")
+  const [sugestao, setSugestao] = useState<string | null>(null);
+  const [sugLoading, setSugLoading] = useState(false);
 
   // Categorias de produtos (lista sugerida + personalizadas, guardadas na BD)
   const [productCats, setProductCats] = useState<string[]>(DEFAULT_PRODUCT_CATEGORIES);
@@ -201,6 +212,8 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
     setVariants([emptyVariant()]);
     setAddingNewCat(false);
     setAddingNewBrand(false);
+    setImgPreview(null); setImgPayload(null); setImgRemoved(false);
+    setSugestao(null);
     setDialogOpen(true);
   };
 
@@ -215,6 +228,8 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
       setDraft({ code: vs[0].productCode, name: vs[0].productName, category: vs[0].category, brand: vs[0].brand ?? "" });
       setAddingNewCat(false);
       setAddingNewBrand(false);
+      setImgPreview(vs[0].imagem ?? null); setImgPayload(null); setImgRemoved(false);
+      setSugestao(null);
       setVariants(vs.map((v) => ({
         id: v.id,
         color: v.color ?? "", size: v.size ?? "",
@@ -233,6 +248,46 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   // Códigos já usados - para avisar ANTES de tentar gravar
   const usedCodes = useMemo(() => new Set(catalog.map((v) => v.productCode.toUpperCase())), [catalog]);
   const codeTaken = !editing && !!draft.code.trim() && usedCodes.has(draft.code.trim().toUpperCase());
+
+  // P2: mostra a sugestão apenas quando ajuda (prefixo sem número, ou código ocupado)
+  const typedHasDigits = /\d/.test(draft.code.trim());
+  const showSug = !editing && !!sugestao && sugestao.toUpperCase() !== draft.code.trim().toUpperCase() && (!typedHasDigits || codeTaken);
+
+  // P2: pergunta ao servidor o próximo código livre p/ o prefixo digitado
+  useEffect(() => {
+    if (editing) { setSugestao(null); return; }
+    const code = draft.code.trim();
+    if (code.length < 2 || !/[a-zA-Z]/.test(code)) { setSugestao(null); return; }
+    setSugLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetchT(`/api/products/codigo-sugestao?prefixo=${encodeURIComponent(code)}`);
+        const data = await res.json().catch(() => ({}));
+        setSugestao(typeof data.sugestao === "string" ? data.sugestao : null);
+      } catch { setSugestao(null); }
+      finally { setSugLoading(false); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [draft.code, editing]);
+
+  // P2: foto escolhida no aparelho → comprime (máx 1000px JPEG) e fica em pré-visualização
+  const onPickImagem = async (f: File | null) => {
+    if (!f) return;
+    try {
+      const payload = await ficheiroParaJpeg(f);
+      setImgPayload(payload);
+      setImgPreview(`data:${payload.mime};base64,${payload.data}`);
+      setImgRemoved(false);
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro ao processar a imagem", variant: "destructive" });
+    }
+  };
+
+  const onRemoveImagem = () => {
+    setImgPayload(null);
+    setImgPreview(null);
+    setImgRemoved(true);
+  };
 
   const save = async () => {
     if (savingRef.current) return; // já está a gravar
@@ -268,6 +323,25 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? "Erro ao guardar");
+      }
+      // P2: gravado! Agora envia/remove a foto (falha da foto não desfaz o produto)
+      const saved = editing ? null : await res.json().catch(() => null);
+      const pid = editing ? editing.id : (saved as { id?: string } | null)?.id;
+      if (pid) {
+        if (imgPayload) {
+          try {
+            const r2 = await fetchT(`/api/products/${pid}/imagem`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(imgPayload),
+            });
+            if (!r2.ok) throw new Error();
+          } catch {
+            toast({ title: "Produto gravado, mas a foto não foi guardada", description: "Edite o produto e envie a foto de novo.", variant: "destructive" });
+          }
+        } else if (imgRemoved) {
+          try { await fetchT(`/api/products/${pid}/imagem`, { method: "DELETE" }); } catch { /* silencioso */ }
+        }
       }
       toast({ title: editing ? "Produto atualizado" : "Produto criado com sucesso" });
       setDialogOpen(false);
@@ -370,11 +444,21 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
           {grouped.map(([productId, vs]) => (
             <div key={productId} className="card-lux overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2.5 bg-muted/50 border-b">
-                <div className="min-w-0">
-                  <p className="font-semibold text-sm truncate">{vs[0].productName}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    <span className="text-gold font-mono">{vs[0].productCode}</span> · {vs[0].category}{vs[0].brand ? ` · ${vs[0].brand}` : ""}
-                  </p>
+                <div className="flex items-center gap-3 min-w-0">
+                  {vs[0].imagem ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={vs[0].imagem} alt={vs[0].productName} className="w-10 h-10 rounded-lg object-cover border border-gold/30 shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center shrink-0">
+                      <ImageIcon className="w-4 h-4 text-gold/50" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm truncate">{vs[0].productName}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      <span className="text-gold font-mono">{vs[0].productCode}</span> · {vs[0].category}{vs[0].brand ? ` · ${vs[0].brand}` : ""}
+                    </p>
+                  </div>
                 </div>
                 <Button size="sm" variant="ghost" onClick={() => openEdit(productId)}>Editar grade</Button>
               </div>
@@ -516,6 +600,16 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                 <Label className="text-xs">Código *</Label>
                 <Input value={draft.code} disabled={!!editing} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="PERF-010" className="font-mono" />
                 {codeTaken && <p className="text-[11px] text-destructive mt-1">Este código já existe - use outro (ex: acrescente 02, 03…)</p>}
+                {showSug && sugestao && (
+                  <button
+                    type="button"
+                    onClick={() => setDraft({ ...draft, code: sugestao })}
+                    className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/40 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                  >
+                    <Check className="w-3 h-3" /> Livre: <b>{sugestao}</b>&nbsp;— tocar para usar
+                  </button>
+                )}
+                {sugLoading && !showSug && <p className="text-[10px] text-muted-foreground mt-1">a procurar código livre…</p>}
               </div>
               <div className="sm:col-span-3">
                 <Label className="text-xs">Nome do produto *</Label>
@@ -616,6 +710,38 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                     </Button>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* P2: foto do produto - comprimida no aparelho, guardada no Supabase */}
+            <div className="flex items-center gap-3 pt-1">
+              {imgPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={imgPreview} alt="Foto do produto" className="w-16 h-16 rounded-lg object-cover border border-gold/40" />
+              ) : (
+                <div className="w-16 h-16 rounded-lg border border-dashed border-gold/40 bg-accent/50 flex items-center justify-center">
+                  <ImageIcon className="w-5 h-5 text-gold/60" />
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium">Foto do produto <span className="text-muted-foreground font-normal">- aparece no catálogo e no portal do cliente /loja</span></p>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => imgInputRef.current?.click()}>
+                    <ImageIcon className="w-3.5 h-3.5 mr-1" /> {imgPreview ? "Trocar foto" : "Escolher foto"}
+                  </Button>
+                  {imgPreview && (
+                    <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={onRemoveImagem}>
+                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Remover
+                    </Button>
+                  )}
+                </div>
+                <input
+                  ref={imgInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => { onPickImagem(e.target.files?.[0] ?? null); e.currentTarget.value = ""; }}
+                />
               </div>
             </div>
           </div>

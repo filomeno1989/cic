@@ -19,6 +19,7 @@ export async function GET() {
           productCode: p.code,
           category: p.category,
           brand: p.brand,
+          imagem: p.imagem, // P2: foto do produto (catálogo + portal)
           color: v.color,
           size: v.size,
           costPrice: v.costPrice,

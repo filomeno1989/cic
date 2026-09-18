@@ -1,13 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
-import { Loader2, Save, Printer, DatabaseBackup, Upload, Download, AlertTriangle, CheckCircle2, Trash2 } from "lucide-react";
+import {
+  Loader2, Save, Printer, DatabaseBackup, Upload, Download, AlertTriangle, CheckCircle2, Trash2,
+  QrCode, Copy, Send, ExternalLink, Store,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { StoreInfo } from "@/components/receipt";
 import type { SessionUser } from "@/lib/types";
@@ -32,6 +36,11 @@ export function DefinicoesView({
   const [pendingRestore, setPendingRestore] = useState<{ name: string; payload: unknown; meta: { exportedAt?: string; counts?: Record<string, number> } } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // P2: Portal do cliente /loja - QR + link com mensagem bonita
+  const [waMsg, setWaMsg] = useState("Bem-vindo(a) ao nosso catálogo online! ✨ Veja as novidades:");
+  const [portalLink, setPortalLink] = useState("");
+  const [qrData, setQrData] = useState<string | null>(null);
+
   // Limpeza total da base de dados
   const [resetOpen, setResetOpen] = useState(false);
   const [resetText, setResetText] = useState("");
@@ -40,6 +49,38 @@ export function DefinicoesView({
   const lastBackup = typeof window !== "undefined" ? localStorage.getItem(LAST_BACKUP_KEY) : null;
   const lastBackupDate = lastBackup ? new Date(lastBackup) : null;
   const daysSince = lastBackupDate ? Math.floor((Date.now() - lastBackupDate.getTime()) / 86400000) : null;
+
+  // P2: link do portal = origem actual + /loja + a mensagem do utilizador (com acentos!)
+  useEffect(() => {
+    setPortalLink(`${window.location.origin}/loja?msg=${encodeURIComponent(waMsg)}`);
+  }, [waMsg]);
+
+  // P2: QR gerado no navegador (sem rede) a partir do link
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!portalLink) return;
+      try {
+        const QR = (await import("qrcode")).default;
+        const url = await QR.toDataURL(portalLink, { width: 420, margin: 2, color: { dark: "#0a0a0a", light: "#ffffff" } });
+        if (alive) setQrData(url);
+      } catch { if (alive) setQrData(null); }
+    })();
+    return () => { alive = false; };
+  }, [portalLink]);
+
+  const copiarLink = async () => {
+    try {
+      await navigator.clipboard.writeText(portalLink);
+      toast({ title: "Link copiado", description: "Cole na conversa do cliente." });
+    } catch {
+      toast({ title: "Não foi possível copiar - copie manualmente:", description: portalLink, variant: "destructive" });
+    }
+  };
+
+  const partilharWhatsapp = () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(`${waMsg}\n${portalLink}`)}`, "_blank");
+  };
 
   const save = async () => {
     setSaving(true);
@@ -184,6 +225,59 @@ export function DefinicoesView({
           </Button>
         ) : (
           <p className="text-xs text-muted-foreground text-center">Apenas o gerente pode alterar as definições.</p>
+        )}
+      </div>
+
+      {/* ---------- P2: Portal do Cliente (só gerente) ---------- */}
+      <div className="card-lux p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center"><QrCode className="w-4.5 h-4.5 text-gold" /></span>
+          <div>
+            <h3 className="font-bold text-sm">Portal do Cliente · /loja</h3>
+            <p className="text-xs text-muted-foreground">Catálogo online com fotos e preços - o cliente encomenda pelo WhatsApp da loja.</p>
+          </div>
+        </div>
+
+        {isManager ? (
+          <>
+            <div>
+              <Label className="text-xs">WhatsApp que recebe as encomendas <span className="text-muted-foreground font-normal">- só números</span></Label>
+              <Input value={form.whatsappLoja ?? ""} inputMode="tel" onChange={(e) => setForm({ ...form, whatsappLoja: e.target.value.replace(/[^+\d]/g, "") })} placeholder="Ex: 841234567 ou 258841234567" />
+            </div>
+            <div>
+              <Label className="text-xs">Mensagem bonita para enviar aos clientes <span className="text-muted-foreground font-normal">- aparece no topo do portal (em vez de códigos aleatórios)</span></Label>
+              <Textarea rows={2} value={waMsg} onChange={(e) => setWaMsg(e.target.value)} placeholder="Ex: Bem-vinda ao nosso catálogo! Novidades toda a semana ✨" />
+            </div>
+            <div className="rounded-lg border p-3 space-y-2.5">
+              <p className="text-[11px] text-muted-foreground break-all"><b>Link do portal:</b> {portalLink || "…"}</p>
+              <div className="flex items-center gap-3">
+                {qrData ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={qrData} alt="QR Code do portal" className="w-28 h-28 rounded-lg border bg-white p-1 shrink-0" />
+                ) : (
+                  <div className="w-28 h-28 rounded-lg border bg-muted animate-pulse shrink-0" />
+                )}
+                <div className="flex-1 grid grid-cols-1 gap-1.5">
+                  <Button size="sm" variant="outline" onClick={copiarLink}><Copy className="w-3.5 h-3.5 mr-1" /> Copiar link</Button>
+                  <Button size="sm" variant="outline" onClick={partilharWhatsapp}><Send className="w-3.5 h-3.5 mr-1" /> Enviar por WhatsApp</Button>
+                  <Button size="sm" variant="outline" onClick={() => window.open("/loja", "_blank")}><ExternalLink className="w-3.5 h-3.5 mr-1" /> Abrir portal</Button>
+                  {qrData && (
+                    <a href={qrData} download="portal-cic-qr.png" className="block">
+                      <Button size="sm" variant="outline" className="w-full"><Download className="w-3.5 h-3.5 mr-1" /> Descarregar QR</Button>
+                    </a>
+                  )}
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Dois modos de partilha: <b>por QR</b> (imprima e cole no balcão - o cliente aponta a câmara) e <b>por link</b> (a mensagem bonita viaja no link e aparece no portal do cliente).
+              </p>
+            </div>
+            <Button className="btn-gold w-full" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Store className="w-4 h-4 mr-1" /> Guardar WhatsApp do Portal</>}
+            </Button>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">Apenas o gerente configura o portal do cliente.</p>
         )}
       </div>
 

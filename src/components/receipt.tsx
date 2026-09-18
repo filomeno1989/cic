@@ -10,7 +10,7 @@ import { shareOrDownloadReceipt } from "@/lib/receipt-image";
 import type { SaleFlat } from "@/lib/types";
 
 export type StoreInfo = {
-  storeName: string; phone: string; address: string; receiptFooter: string; thermalWidth: string; nuit?: string;
+  storeName: string; phone: string; address: string; receiptFooter: string; thermalWidth: string; nuit?: string; whatsappLoja?: string;
 };
 
 export function buildReceiptText(sale: SaleFlat, store: StoreInfo): string {

@@ -19,10 +19,26 @@ type Expense = { id: string; category: string; description: string | null; amoun
 type Closing = {
   id: string; closedAt: string; userName: string;
   countedCash: number; countedPos: number; countedMpesa: number;
+  countedEmola?: number | null; countedMkesh?: number | null;
   expectedCash?: number; expectedPos?: number; expectedMpesa?: number;
+  expectedEmola?: number | null; expectedMkesh?: number | null;
   diffCash?: number; diffPos?: number; diffMpesa?: number;
+  diffEmola?: number | null; diffMkesh?: number | null;
   salesTotal?: number; note?: string | null;
 };
+
+// Selo compacto de diferença: ✓ certo · verde sobra (+) · vermelho falta (−)
+function DifBadge({ d }: { d: number | null | undefined }) {
+  if (d === null || d === undefined || Math.abs(d) < 0.009) {
+    return <span className="text-[11px] text-muted-foreground">✓ certo</span>;
+  }
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-bold ${d < 0 ? "text-destructive" : "text-green-600"}`}>
+      {d < 0 ? <XCircle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
+      {d < 0 ? `-${mt(-d)}` : `+${mt(d)}`}
+    </span>
+  );
+}
 
 export function FinanceiroView({ user, online, onDataChanged }: { user: SessionUser; online: boolean; onDataChanged: () => void }) {
   const { toast } = useToast();
@@ -39,8 +55,9 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
   const [catSaving, setCatSaving] = useState(false);
   const catSavingRef = useRef(false);
 
-  // Fecho cego
-  const [closeForm, setCloseForm] = useState({ cash: "", pos: "", mpesa: "", note: "" });
+  // Fecho cego - P2: carteiras separadas (M-Pesa / e-Mola / mKesh),
+  // o sistema calcula o esperado de cada uma automaticamente
+  const [closeForm, setCloseForm] = useState({ cash: "", pos: "", mpesa: "", emola: "", mkesh: "", note: "" });
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
   const [closeResult, setCloseResult] = useState<{ closedAt: string; message: string } | null>(null);
@@ -158,6 +175,8 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
           countedCash: parseFloat(closeForm.cash) || 0,
           countedPos: parseFloat(closeForm.pos) || 0,
           countedMpesa: parseFloat(closeForm.mpesa) || 0,
+          countedEmola: parseFloat(closeForm.emola) || 0,
+          countedMkesh: parseFloat(closeForm.mkesh) || 0,
           note: closeForm.note,
         }),
       });
@@ -165,7 +184,7 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
       if (!res.ok) throw new Error(data.error ?? "Erro");
       // Resposta cega - sem diferenças!
       setCloseResult({ closedAt: data.closedAt, message: data.message });
-      setCloseForm({ cash: "", pos: "", mpesa: "", note: "" });
+      setCloseForm({ cash: "", pos: "", mpesa: "", emola: "", mkesh: "", note: "" });
       load();
     } catch (e) {
       if (!online) {
@@ -297,9 +316,23 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
                     <Label className="text-xs">💳 Comprovativos POS (MT)</Label>
                     <Input type="number" inputMode="decimal" value={closeForm.pos} onChange={(e) => setCloseForm({ ...closeForm, pos: e.target.value })} placeholder="Soma dos talões do POS" />
                   </div>
-                  <div>
-                    <Label className="text-xs">📱 SMS M-Pesa / e-Mola / mKesh (MT)</Label>
-                    <Input type="number" inputMode="decimal" value={closeForm.mpesa} onChange={(e) => setCloseForm({ ...closeForm, mpesa: e.target.value })} placeholder="Soma das mensagens de recebimento" />
+                  <div className="rounded-lg border border-gold/30 bg-accent/40 p-3 space-y-2.5">
+                    <p className="text-[11px] font-semibold text-gold uppercase tracking-wide">📱 Carteiras móveis - uma por operadora</p>
+                    <p className="text-[11px] text-muted-foreground -mt-1">Some as SMS de recebimento de CADA carteira. O sistema compara automaticamente com as vendas do turno.</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <Label className="text-[10px] text-red-600 dark:text-red-400 font-semibold">M-Pesa (Vodacom)</Label>
+                        <Input type="number" inputMode="decimal" value={closeForm.mpesa} onChange={(e) => setCloseForm({ ...closeForm, mpesa: e.target.value })} placeholder="0" />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-orange-600 dark:text-orange-400 font-semibold">e-Mola (Movitel)</Label>
+                        <Input type="number" inputMode="decimal" value={closeForm.emola} onChange={(e) => setCloseForm({ ...closeForm, emola: e.target.value })} placeholder="0" />
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-sky-600 dark:text-sky-400 font-semibold">mKesh (Tmcel)</Label>
+                        <Input type="number" inputMode="decimal" value={closeForm.mkesh} onChange={(e) => setCloseForm({ ...closeForm, mkesh: e.target.value })} placeholder="0" />
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <Label className="text-xs">Observação (opcional)</Label>
@@ -334,7 +367,9 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
             <div className="card-lux overflow-hidden">
               <div className="px-4 py-3 border-b bg-muted/40">
                 <h3 className="font-semibold text-sm">Conciliação de Caixa · Quebras e Sobras (confidencial)</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Comparação entre o contado pelo operador e o esperado pelo sistema.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Comparação entre o contado pelo operador e o esperado pelo sistema - agora por CARTEIRA (M-Pesa, e-Mola e mKesh separados).
+                </p>
               </div>
               <div className="overflow-x-auto">
                 <Table>
@@ -342,40 +377,67 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
                     <TableRow>
                       <TableHead>Turno fechado</TableHead>
                       <TableHead>Operador</TableHead>
-                      <TableHead className="text-right">Dinheiro (esp.)</TableHead>
-                      <TableHead className="text-right">Contado</TableHead>
-                      <TableHead className="text-right">Diferença</TableHead>
-                      <TableHead className="text-right">POS / M-Pesa</TableHead>
+                      <TableHead className="text-right">💵 Dinheiro (contado/esp.)</TableHead>
+                      <TableHead className="text-right">💳 POS</TableHead>
+                      <TableHead className="text-right">📱 M-Pesa</TableHead>
+                      <TableHead className="text-right">🟠 e-Mola</TableHead>
+                      <TableHead className="text-right">🔵 mKesh</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {closings.map((c) => {
-                      const diff = c.diffCash ?? 0;
+                      const legado = c.expectedEmola === null || c.expectedEmola === undefined; // fecho no formato antigo (carteiras mescladas)
                       return (
                         <TableRow key={c.id}>
                           <TableCell className="text-xs">{fmtDateTime(c.closedAt)}</TableCell>
                           <TableCell className="text-sm">{c.userName}</TableCell>
-                          <TableCell className="text-right text-xs">{mt(c.expectedCash ?? 0)}</TableCell>
-                          <TableCell className="text-right text-sm">{mt(c.countedCash)}</TableCell>
                           <TableCell className="text-right">
-                            <span className={`inline-flex items-center gap-1 text-sm font-bold ${diff < -0.009 ? "text-destructive" : diff > 0.009 ? "text-green-600" : "text-muted-foreground"}`}>
-                              {Math.abs(diff) < 0.009 ? "✓ certo" : diff < 0 ? <><XCircle className="w-3.5 h-3.5" />-{mt(-diff)}</> : <><CheckCircle2 className="w-3.5 h-3.5" />+{mt(diff)}</>}
-                            </span>
+                            <p className="text-xs">{mt(c.countedCash)} <span className="text-muted-foreground">/ {mt(c.expectedCash ?? 0)}</span></p>
+                            <DifBadge d={c.diffCash ?? 0} />
                           </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">
-                            {c.diffPos !== undefined || c.diffMpesa !== undefined
-                              ? `POS ${c.diffPos && Math.abs(c.diffPos) > 0.009 ? (c.diffPos > 0 ? "+" : "-") + mt(Math.abs(c.diffPos)) : "ok"} · MM ${c.diffMpesa && Math.abs(c.diffMpesa) > 0.009 ? (c.diffMpesa > 0 ? "+" : "-") + mt(Math.abs(c.diffMpesa)) : "ok"}`
-                              : "-"}
+                          <TableCell className="text-right"><DifBadge d={c.diffPos ?? 0} /></TableCell>
+                          <TableCell className="text-right">
+                            {legado ? (
+                              <p className="text-[11px] text-muted-foreground" title="Fecho antigo: M-Pesa + e-Mola + mKesh somados">MM <DifBadge d={c.diffMpesa} /></p>
+                            ) : (
+                              <div>
+                                <p className="text-xs">{mt(c.countedMpesa)} <span className="text-muted-foreground">/ {mt(c.expectedMpesa ?? 0)}</span></p>
+                                <DifBadge d={c.diffMpesa} />
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {legado ? (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            ) : (
+                              <div>
+                                <p className="text-xs">{mt(c.countedEmola ?? 0)} <span className="text-muted-foreground">/ {mt(c.expectedEmola ?? 0)}</span></p>
+                                <DifBadge d={c.diffEmola} />
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {legado ? (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            ) : (
+                              <div>
+                                <p className="text-xs">{mt(c.countedMkesh ?? 0)} <span className="text-muted-foreground">/ {mt(c.expectedMkesh ?? 0)}</span></p>
+                                <DifBadge d={c.diffMkesh} />
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
                     })}
                     {closings.length === 0 && (
-                      <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground text-sm py-8">Sem fechos registados.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground text-sm py-8">Sem fechos registados.</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>
               </div>
+              <p className="text-[11px] text-muted-foreground px-4 py-2.5 border-t">
+                Legenda: contado/esperado · ✓ certo · verde = sobra (+) · vermelho = falta (−) · MM = fecho antigo com carteiras somadas.
+              </p>
             </div>
           </TabsContent>
         )}

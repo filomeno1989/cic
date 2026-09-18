@@ -15,6 +15,7 @@ model User {
   pin           String // PIN de acesso (4-6 digitos)
   role          String        @default("CAIXA") // GERENTE | CAIXA
   active        Boolean       @default(true)
+  isSystem      Boolean       @default(false) // conta do proprietário (Manutenção): invisível na RH e intocável por gerentes
   phone         String?
   baseSalary    Float         @default(0)
   commissionPct Float         @default(0) // % comissao sobre vendas
@@ -43,10 +44,23 @@ model Product {
   name       String
   category   String          @default("Geral")
   brand      String?
+  imagem     String? // URL da foto (servida em /api/imagens/<id>) - para catalogo e portal /loja
+  imagemRel  ProductImage?
   variants   ProductVariant[]
   active     Boolean         @default(true)
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
+}
+
+// Bytes da foto guardados na propria base de dados (aditivo, nao toca em produtos existentes)
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String   @unique
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  mime      String   @default("image/jpeg")
+  dados     Bytes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ProductVariant {
@@ -192,6 +206,13 @@ model CashClosing {
   diffCash      Float // visivel apenas ao gerente
   diffPos       Float
   diffMpesa     Float
+  // P2: carteiras separadas (null = fecho no formato antigo, mobile money mesclado)
+  countedEmola  Float?
+  expectedEmola Float?
+  diffEmola     Float?
+  countedMkesh  Float?
+  expectedMkesh Float?
+  diffMkesh     Float?
   salesTotal    Float
   note          String?
   closedAt      DateTime @default(now())
@@ -208,4 +229,5 @@ model Settings {
   expenseCategories String  @default("") // JSON array de categorias de despesa (fixas)
   productCategories String  @default("") // JSON array de categorias de produtos
   productBrands     String  @default("") // JSON array de marcas
+  whatsappLoja      String  @default("") // WhatsApp CTA do portal do cliente /loja
 }

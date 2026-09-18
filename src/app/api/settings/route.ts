@@ -29,7 +29,7 @@ export async function PUT(req: NextRequest) {
     if (session.role !== "GERENTE") return forbidden()
 
     const body = await req.json()
-    const { storeName, phone, address, receiptFooter, thermalWidth, nuit, expenseCategories, productCategories, productBrands } = body
+    const { storeName, phone, address, receiptFooter, thermalWidth, nuit, expenseCategories, productCategories, productBrands, whatsappLoja } = body
 
     // Categorias: devem ser arrays de strings (podem vir apenas uma das listas)
     const expenseJson =
@@ -63,11 +63,15 @@ export async function PUT(req: NextRequest) {
         ...(receiptFooter !== undefined && { receiptFooter: receiptFooter || "" }),
         ...(thermalWidth && { thermalWidth: thermalWidth === "58" ? "58" : "80" }),
         ...(nuit !== undefined && { nuit: nuit || "" }),
+        ...(whatsappLoja !== undefined && { whatsappLoja: typeof whatsappLoja === "string" ? whatsappLoja.trim() : "" }),
         ...(expenseJson !== undefined && { expenseCategories: expenseJson }),
         ...(productJson !== undefined && { productCategories: productJson }),
         ...(brandJson !== undefined && { productBrands: brandJson }),
       },
-      create: { id: "main" },
+      create: {
+        id: "main",
+        ...(whatsappLoja !== undefined && { whatsappLoja: typeof whatsappLoja === "string" ? whatsappLoja.trim() : "" }),
+      },
     })
     return NextResponse.json({
       ...settings,

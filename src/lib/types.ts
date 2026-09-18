@@ -17,6 +17,7 @@ export type ProductVariantFlat = {
   productCode: string
   category: string
   brand: string | null
+  imagem: string | null // P2: foto do produto (portal + catálogo)
   color: string | null
   size: string | null
   costPrice: number

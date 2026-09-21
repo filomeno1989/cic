@@ -285,6 +285,7 @@ export async function POST(req: NextRequest) {
                   qty: Math.floor(Number(i.qty) || 0),
                   unitPrice: unitario,
                   total: round2(unitario * (Math.floor(Number(i.qty) || 0))),
+                  costPrice: v.costPrice, // v2.7: custo unitário gravado NO MOMENTO da venda
                 }
               })
             ),

@@ -10,13 +10,25 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { mt, fmtDateTime, methodLabel } from "@/lib/format";
 import { wallClockMZ, mzMidnight, mzEndOfDay, currentMonthMZ } from "@/lib/tz";
 import type { SaleFlat, SessionUser, ProductVariantFlat, CustomerFlat } from "@/lib/types";
-import { Receipt, Ban, Loader2, Search, FileDown, ShoppingCart, Wallet, Package, TrendingDown, Users2, CalendarDays } from "lucide-react";
+import { Receipt, Ban, Loader2, Search, FileDown, ShoppingCart, Wallet, Package, TrendingDown, TrendingUp, Users2, CalendarDays, Percent, Boxes } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ManagerPinDialog } from "@/components/manager-pin";
 import { ReceiptDialog, type StoreInfo } from "@/components/receipt";
-import { salesReportPdf, debtorsReportPdf, stockReportPdf, expensesReportPdf, payrollReportPdf } from "@/lib/pdf";
+import { salesReportPdf, debtorsReportPdf, stockReportPdf, expensesReportPdf, payrollReportPdf, lucroReportPdf } from "@/lib/pdf";
 
 type Expense = { id: string; category: string; description: string | null; amount: number; date: string; user?: { name: string } };
+
+type LucroData = {
+  resumo: {
+    receita: number; custo: number; lucroBruto: number; despesas: number;
+    lucroLiquido: number; margemPct: number; margemLiquidaPct: number;
+    comissoes: number; vendasCount: number; ticketMedio: number;
+    anuladasCount: number; anuladasValor: number; creditado: number;
+  };
+  porProduto: Array<{ nome: string; variante: string; qty: number; receita: number; custo: number; lucro: number; margemPct: number }>;
+  porMetodo: Array<{ metodo: string; total: number }>;
+  stock: { valorCusto: number; valorRetalho: number; unidades: number };
+};
 
 type PeriodKey = "hoje" | "7d" | "mes" | "mespassado" | "tudo";
 
@@ -73,6 +85,30 @@ export function RelatoriosView({
   const [period, setPeriod] = useState<PeriodKey>("mes");
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
   const [payrollMonth, setPayrollMonth] = useState(() => currentMonthMZ());
+
+  // ---------- LUCRO (v2.7) ----------
+  const [tab, setTab] = useState("vendas");
+  const [lucroPeriod, setLucroPeriod] = useState<PeriodKey>("mes");
+  const [lucroData, setLucroData] = useState<LucroData | null>(null);
+  const [lucroLoading, setLucroLoading] = useState(false);
+
+  const loadLucro = useCallback(async (p: PeriodKey) => {
+    setLucroLoading(true);
+    try {
+      const { from, to } = periodRange(p);
+      const params = new URLSearchParams();
+      if (from) params.set("from", from.toISOString());
+      if (to) params.set("to", to.toISOString()); // to sai no fim do dia de Maputo
+      const res = await fetch(`/api/lucro?${params}`);
+      if (res.ok) setLucroData(await res.json());
+    } catch { /* offline */ } finally {
+      setLucroLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isManager && tab === "lucro") loadLucro(lucroPeriod);
+  }, [isManager, tab, lucroPeriod, loadLucro]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -209,14 +245,25 @@ export function RelatoriosView({
       await payrollReportPdf({ store, generatedBy: user.name, payroll: data });
     }, "Folha salarial descarregada.");
 
+  const genLucro = () =>
+    generate("lucro", async () => {
+      if (!lucroData) throw new Error("Os números do lucro ainda não carregaram");
+      const { fromLabel, toLabel } = periodRange(lucroPeriod);
+      await lucroReportPdf({
+        store, generatedBy: user.name, fromLabel, toLabel,
+        lucro: { ...lucroData.resumo, porProduto: lucroData.porProduto, porMetodo: lucroData.porMetodo, stock: lucroData.stock },
+      });
+    }, "Relatório de lucro descarregado.");
+
   const pdfBusyIcon = (key: string) =>
     pdfBusy === key ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />;
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="vendas">
+      <Tabs value={tab} onValueChange={setTab} defaultValue="vendas">
         <TabsList>
           <TabsTrigger value="vendas" className="gap-1.5"><ShoppingCart className="w-3.5 h-3.5" /> Vendas</TabsTrigger>
+          {isManager && <TabsTrigger value="lucro" className="gap-1.5"><TrendingUp className="w-3.5 h-3.5" /> Lucro</TabsTrigger>}
           {isManager && <TabsTrigger value="pdf" className="gap-1.5"><FileDown className="w-3.5 h-3.5" /> Relatórios PDF</TabsTrigger>}
         </TabsList>
 
@@ -293,6 +340,137 @@ export function RelatoriosView({
             </div>
           </div>
         </TabsContent>
+
+        {/* ---------- LUCRO (v2.7 - pedido da Cleide) ---------- */}
+        {isManager && (
+          <TabsContent value="lucro" className="space-y-4">
+            <div className="card-lux p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-sm">Lucro do período</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Vendas − custo das mercadorias − despesas. O custo usado é o gravado no momento de cada venda.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => setLucroPeriod(p.key)}
+                    className={`px-3 h-8 rounded-full text-xs font-medium border transition-all ${
+                      lucroPeriod === p.key ? "border-gold bg-accent text-accent-foreground" : "border-border text-muted-foreground hover:border-gold/50"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <Button size="sm" className="btn-gold h-8 rounded-full px-3" onClick={genLucro} disabled={pdfBusy !== null || !lucroData}>
+                  {pdfBusyIcon("lucro")} PDF
+                </Button>
+              </div>
+            </div>
+
+            {lucroLoading && !lucroData ? (
+              <div className="flex items-center justify-center py-16 text-muted-foreground">
+                <Loader2 className="w-6 h-6 animate-spin text-gold" />
+              </div>
+            ) : lucroData ? (
+              <>
+                {/* KPIs do período */}
+                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+                  <div className="card-lux p-4 ring-1 ring-gold/40">
+                    <TrendingUp className="w-4 h-4 mb-2 text-gold" />
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Receita</p>
+                    <p className="text-lg font-bold mt-0.5">{mt(lucroData.resumo.receita)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{lucroData.resumo.vendasCount} venda(s) · ticket {mt(lucroData.resumo.ticketMedio)}</p>
+                  </div>
+                  <div className="card-lux p-4">
+                    <Package className="w-4 h-4 mb-2 text-muted-foreground" />
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Custo das mercadorias</p>
+                    <p className="text-lg font-bold mt-0.5">{mt(lucroData.resumo.custo)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">o que os artigos custaram</p>
+                  </div>
+                  <div className="card-lux p-4">
+                    <TrendingUp className="w-4 h-4 mb-2 text-emerald-600" />
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Lucro bruto</p>
+                    <p className={`text-lg font-bold mt-0.5 ${lucroData.resumo.lucroBruto < 0 ? "text-destructive" : "text-emerald-600"}`}>{mt(lucroData.resumo.lucroBruto)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">margem {lucroData.resumo.margemPct.toFixed(1)}%</p>
+                  </div>
+                  <div className="card-lux p-4">
+                    <TrendingDown className="w-4 h-4 mb-2 text-destructive" />
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Despesas</p>
+                    <p className="text-lg font-bold mt-0.5 text-destructive">{mt(lucroData.resumo.despesas)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">saídas registadas do período</p>
+                  </div>
+                  <div className="card-lux p-4 ring-1 ring-gold/40">
+                    <Wallet className="w-4 h-4 mb-2 text-gold" />
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Lucro líquido</p>
+                    <p className={`text-lg font-bold mt-0.5 ${lucroData.resumo.lucroLiquido < 0 ? "text-destructive" : "text-gold"}`}>{mt(lucroData.resumo.lucroLiquido)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">margem líquida {lucroData.resumo.margemLiquidaPct.toFixed(1)}%</p>
+                  </div>
+                  <div className="card-lux p-4">
+                    <Boxes className="w-4 h-4 mb-2 text-muted-foreground" />
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Stock actual</p>
+                    <p className="text-lg font-bold mt-0.5">{mt(lucroData.stock.valorCusto)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{lucroData.stock.unidades} un. · {mt(lucroData.stock.valorRetalho)} a retalho</p>
+                  </div>
+                </div>
+
+                {/* Contexto extra */}
+                <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-xs text-muted-foreground px-1">
+                  <span><Percent className="w-3 h-3 inline mr-1 text-gold" />Comissões do período: <b className="text-foreground">{mt(lucroData.resumo.comissoes)}</b></span>
+                  <span>Vendas a fiação do período: <b className="text-foreground">{mt(lucroData.resumo.creditado)}</b> (receita ainda por receber)</span>
+                  <span>Anuladas: <b className="text-foreground">{lucroData.resumo.anuladasCount}</b> ({mt(lucroData.resumo.anuladasValor)}) - não contam para o lucro</span>
+                </div>
+
+                {/* Ranking de produtos */}
+                <div className="card-lux overflow-hidden">
+                  <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                    <h3 className="text-sm font-semibold">Produtos por lucro no período</h3>
+                    <span className="text-xs text-muted-foreground">{lucroData.porProduto.length} artigo(s) vendido(s)</span>
+                  </div>
+                  <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-card z-10">
+                        <TableRow>
+                          <TableHead>#</TableHead>
+                          <TableHead>Produto</TableHead>
+                          <TableHead>Qtd</TableHead>
+                          <TableHead className="text-right">Receita</TableHead>
+                          <TableHead className="text-right">Custo</TableHead>
+                          <TableHead className="text-right">Lucro</TableHead>
+                          <TableHead className="text-right">Margem</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {lucroData.porProduto.map((p, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
+                            <TableCell className="text-sm">
+                              {p.nome}
+                              {p.variante && <span className="text-gold text-xs ml-1.5">{p.variante}</span>}
+                            </TableCell>
+                            <TableCell className="text-xs font-bold">{p.qty}</TableCell>
+                            <TableCell className="text-right text-xs">{mt(p.receita)}</TableCell>
+                            <TableCell className="text-right text-xs text-muted-foreground">{mt(p.custo)}</TableCell>
+                            <TableCell className={`text-right text-sm font-bold ${p.lucro < 0 ? "text-destructive" : "text-emerald-600"}`}>{mt(p.lucro)}</TableCell>
+                            <TableCell className="text-right text-xs">{p.margemPct.toFixed(1)}%</TableCell>
+                          </TableRow>
+                        ))}
+                        {lucroData.porProduto.length === 0 && (
+                          <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10 text-sm">Nenhuma venda neste período.</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="card-lux p-8 text-center text-sm text-muted-foreground">
+                Não foi possível carregar o lucro (sem internet?). Tenta novamente ao recuperar a ligação.
+              </div>
+            )}
+          </TabsContent>
+        )}
 
         {/* ---------- Relatórios PDF (gerente) ---------- */}
         {isManager && (

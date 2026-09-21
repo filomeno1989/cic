@@ -190,6 +190,7 @@ model SaleItem {
   qty          Int
   unitPrice    Float
   total        Float
+  costPrice    Float @default(0) // v2.7: custo unitário NO MOMENTO da venda - o lucro histórico fica exato mesmo se o custo do produto mudar depois
 
   @@index([saleId]) // v2.6 (D1)
   @@index([variantId])

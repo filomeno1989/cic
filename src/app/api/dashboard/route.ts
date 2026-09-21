@@ -76,9 +76,11 @@ export async function GET(req: NextRequest) {
     const amortTotal = round2(todayAmorts.reduce((a, p) => a + p.amount, 0))
 
     // Lucro (apenas gerente): vendas − custo das mercadorias − despesas
+    // v2.7: usa o custo gravado NO MOMENTO da venda (SaleItem.costPrice);
+    // o fallback para o custo actual da variante cobre vendas antigas
     let todayProfit: number | null = null
     if (isManager) {
-      const cost = round2(todaySales.flatMap((s) => s.items).reduce((a, i) => a + i.variant.costPrice * i.qty, 0))
+      const cost = round2(todaySales.flatMap((s) => s.items).reduce((a, i) => a + (i.costPrice > 0 ? i.costPrice : i.variant.costPrice) * i.qty, 0))
       todayProfit = round2(todayTotal - cost - expenseTotal)
     }
 

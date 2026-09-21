@@ -422,7 +422,136 @@ export async function expensesReportPdf(opts: {
   finishDoc(ctx, `despesas-cic-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
-// =============== 5. FOLHA SALARIAL ===============
+// =============== 5. LUCRO (v2.7) ===============
+export type PdfLucro = {
+  receita: number; custo: number; lucroBruto: number; despesas: number;
+  lucroLiquido: number; margemPct: number; comissoes: number;
+  vendasCount: number; ticketMedio: number; anuladasCount: number; anuladasValor: number;
+  creditado: number;
+  porProduto: Array<{ nome: string; variante: string; qty: number; receita: number; custo: number; lucro: number; margemPct: number }>;
+  porMetodo: Array<{ metodo: string; total: number }>;
+  stock: { valorCusto: number; valorRetalho: number; unidades: number };
+};
+
+export async function lucroReportPdf(opts: {
+  store: PdfStore; lucro: PdfLucro; fromLabel: string; toLabel: string; generatedBy: string;
+}) {
+  const { store, lucro, fromLabel, toLabel, generatedBy } = opts;
+  await loadLogo();
+  const ctx = await buildCtx(store, "Relatório de Lucro", `${fromLabel} a ${toLabel}`, generatedBy);
+  const { doc } = ctx;
+  let y = 40;
+  y = stampLine(ctx, y);
+
+  y = summaryBoxes(ctx, y, [
+    { label: "Receita (vendas)", value: money(lucro.receita), color: GREEN },
+    { label: "Custo mercadoria", value: money(lucro.custo) },
+    { label: "Despesas", value: money(lucro.despesas), color: RED },
+    { label: "Lucro líquido", value: money(lucro.lucroLiquido), color: lucro.lucroLiquido >= 0 ? GOLD : RED },
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Indicador", "Valor"]],
+    body: [
+      ["Vendas concluídas no período", String(lucro.vendasCount)],
+      ["Ticket médio", money(lucro.ticketMedio)],
+      ["Receita total", money(lucro.receita)],
+      ["(−) Custo das mercadorias vendidas", money(lucro.custo)],
+      ["= Lucro bruto", money(lucro.lucroBruto)],
+      ["Margem bruta", `${lucro.margemPct.toFixed(1)}%`],
+      ["(−) Despesas da loja no período", money(lucro.despesas)],
+      ["= Lucro líquido", money(lucro.lucroLiquido)],
+      ["Comissões dos vendedores (já incluídas nas despesas? não - informativo)", money(lucro.comissoes)],
+      ["Vendas a fiação no período (receita ainda por receber)", money(lucro.creditado)],
+      ["Vendas anuladas", `${lucro.anuladasCount} (${money(lucro.anuladasValor)})`],
+    ],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 1.8, lineColor: LINE, textColor: DARK },
+    headStyles: { fillColor: GOLD, textColor: DARK, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [252, 250, 245] },
+    columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
+    didParseCell: (data) => {
+      const row = data.row.raw as string[] | undefined;
+      if (data.section === "body" && row && (row[0].startsWith("=") || row[0].startsWith("(−)"))) {
+        data.cell.styles.fontStyle = "bold";
+        if (row[0].startsWith("=")) data.cell.styles.fillColor = GOLD_LIGHT;
+      }
+    },
+    margin: { left: 14, right: 14 },
+  });
+  y = lastY(doc, y) + 6;
+
+  // Pagamentos por método
+  if (lucro.porMetodo.length) {
+    autoTable(doc, {
+      startY: y,
+      head: [["Recebido por forma de pagamento", "Total"]],
+      body: lucro.porMetodo.map((m) => [METHOD_LABELS[m.metodo] ?? m.metodo, money(m.total)]),
+      theme: "grid",
+      styles: { fontSize: 8, cellPadding: 1.8, lineColor: LINE, textColor: DARK },
+      headStyles: { fillColor: DARK, textColor: [255, 235, 170], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [252, 250, 245] },
+      columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
+      margin: { left: 14, right: 14 },
+    });
+    y = lastY(doc, y) + 6;
+  }
+
+  // Produtos mais rentáveis
+  autoTable(doc, {
+    startY: y,
+    head: [["Produto", "Variante", "Qtd", "Receita", "Custo", "Lucro", "Margem"]],
+    body: lucro.porProduto
+      .slice(0, 300)
+      .map((p) => [
+        p.nome,
+        p.variante || "-",
+        String(p.qty),
+        money(p.receita), money(p.custo), money(p.lucro),
+        `${p.margemPct.toFixed(1)}%`,
+      ]),
+    theme: "grid",
+    styles: { fontSize: 7, cellPadding: 1.5, lineColor: LINE, textColor: DARK },
+    headStyles: { fillColor: GOLD, textColor: DARK, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [252, 250, 245] },
+    columnStyles: {
+      0: { cellWidth: 52 }, 1: { cellWidth: 24 }, 2: { halign: "right", cellWidth: 10 },
+      3: { halign: "right" }, 4: { halign: "right" },
+      5: { halign: "right", fontStyle: "bold", textColor: GREEN }, 6: { halign: "right", cellWidth: 15 },
+    },
+    didParseCell: (data) => {
+      if (data.section === "body") {
+        const row = data.row.raw as string[] | undefined;
+        if (row && parseFloat((row[5] ?? "").replace(/[^\d.-]/g, "")) < 0)
+          data.cell.styles.textColor = RED;
+      }
+    },
+    margin: { left: 14, right: 14 },
+  });
+  y = lastY(doc, y) + 6;
+
+  // Stock actual (contexto)
+  autoTable(doc, {
+    startY: y,
+    head: [["Stock actual (informativo)", "Valor"]],
+    body: [
+      ["Unidades em loja", String(lucro.stock.unidades)],
+      ["Valor do stock a custo", money(lucro.stock.valorCusto)],
+      ["Valor do stock a retalho", money(lucro.stock.valorRetalho)],
+    ],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 1.8, lineColor: LINE, textColor: DARK },
+    headStyles: { fillColor: DARK, textColor: [255, 235, 170], fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [252, 250, 245] },
+    columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
+    margin: { left: 14, right: 14 },
+  });
+
+  finishDoc(ctx, `lucro-cic-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+// =============== 6. FOLHA SALARIAL ===============
 export type PdfPayroll = {
   month: string;
   rows: Array<{ name: string; role: string; baseSalary: number; salesTotal: number; commissions: number; vales: number; toPay: number }>;

@@ -3,12 +3,36 @@ import { db } from "@/lib/db"
 import { getSessionUser, unauthorized } from "@/lib/auth"
 import { bloqueado, segundosRestantes, registarFalha, registarSucesso, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit"
 import { pinConfere } from "@/lib/pin"
+import { round2 } from "@/lib/money"
 
 type ItemIn = { variantId: string; qty: number; unitPrice: number }
 type PayIn = { method: string; amount: number; change?: number; reference?: string }
 
 class StockError extends Error {}
 class AutorizacaoError extends Error {}
+class LimiteError extends Error {}
+
+// Saldo de fiação de um cliente: crédito concedido (vendas CONCLUÍDAS a
+// crédito) − amortizações. Uma única query SQL com somas na base de dados
+// (v2.6 D4) - antes carregava todas as vendas de crédito para somar em JS.
+// Funciona igual no Postgres (produção) e no SQLite (local).
+async function saldoFiacao(
+  clienteId: string,
+  tx: { $queryRaw: (q: TemplateStringsArray, ...v: unknown[]) => Promise<Array<{ credited: number; amortized: number }>> }
+): Promise<{ credited: number; amortized: number; balance: number }> {
+  const rows = await tx.$queryRaw`
+    SELECT
+      (SELECT COALESCE(SUM(p.amount), 0) FROM "Payment" p
+        JOIN "Sale" s ON s.id = p."saleId"
+        WHERE s."customerId" = ${clienteId} AND p.method = 'CREDITO'
+          AND s.status = 'CONCLUIDA' AND s."isCredit" = TRUE) AS credited,
+      (SELECT COALESCE(SUM(amount), 0) FROM "CreditPayment"
+        WHERE "customerId" = ${clienteId}) AS amortized` as Array<{ credited: number; amortized: number }>
+  const r = rows[0] ?? { credited: 0, amortized: 0 }
+  const credited = round2(Number(r.credited))
+  const amortized = round2(Number(r.amortized))
+  return { credited, amortized, balance: round2(credited - amortized) }
+}
 
 // v2.5 (S5 da auditoria): valida PIN de gerente com bloqueio de tentativas.
 // Usado no desconto >10% quando a sessão não é de gerente.
@@ -105,11 +129,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Venda incompleta" }, { status: 400 })
 
     // Limpeza dos pagamentos (evita valores negativos/NaN gravados)
+    // v2.6 (D2): valores de dinheiro arredondados a 2 decimais
     const cleanPayments = payments
       .map((p) => ({
         method: String(p.method),
-        amount: Math.max(0, Number(p.amount) || 0),
-        change: Math.max(0, Number(p.change) || 0),
+        amount: round2(Math.max(0, Number(p.amount) || 0)),
+        change: round2(Math.max(0, Number(p.change) || 0)),
         reference: p.reference || null,
       }))
       .filter((p) => p.amount > 0)
@@ -139,12 +164,12 @@ export async function POST(req: NextRequest) {
           : v.retailPrice
       precos.set(item.variantId, { preco, nome: v.product.name })
     }
-    const subtotal = items.reduce(
+    const subtotal = round2(items.reduce(
       (a, i) => a + (precos.get(i.variantId)?.preco ?? 0) * (Math.max(0, Math.floor(Number(i.qty) || 0))),
       0
-    )
+    ))
     // Desconto: nunca negativo, nunca acima do subtotal (venda fantasma a 0 MT)
-    const desconto = Math.min(Math.max(0, Number(discount) || 0), subtotal)
+    const desconto = round2(Math.min(Math.max(0, Number(discount) || 0), subtotal))
     // v2.5 (S3): desconto >10% exige gerente na sessão OU PIN de gerente válido
     // (o mesmo PIN validado no ecrã - agora confirmado NO SERVIDOR, com
     // bloqueio de tentativas). A sessão de caixa sozinha não autoriza.
@@ -161,8 +186,8 @@ export async function POST(req: NextRequest) {
         throw new AutorizacaoError("Desconto acima de 10% requer autorização do gerente (PIN).")
       }
     }
-    const total = Math.max(0, subtotal - desconto)
-    const paidTotal = cleanPayments.reduce((a, p) => a + p.amount, 0)
+    const total = round2(Math.max(0, subtotal - desconto))
+    const paidTotal = round2(cleanPayments.reduce((a, p) => a + p.amount, 0))
     if (paidTotal + 0.01 < total)
       return NextResponse.json({ error: "Pagamentos insuficientes para o total" }, { status: 400 })
 
@@ -174,30 +199,20 @@ export async function POST(req: NextRequest) {
       customer = await db.customer.findUnique({ where: { id: customerId } })
       if (!customer) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 })
 
-      // Verifica limite de crédito (saldo atual + novo crédito)
-      const [creditSales, pays] = await Promise.all([
-        db.sale.findMany({
-          where: { customerId, isCredit: true, status: "CONCLUIDA" },
-          select: { payments: { select: { method: true, amount: true } } },
-        }),
-        db.creditPayment.aggregate({
-          where: { customerId }, _sum: { amount: true },
-        }),
-      ])
-      const credited = creditSales.flatMap((s) => s.payments.filter((p) => p.method === "CREDITO")).reduce((a, p) => a + p.amount, 0)
-      const amortized = pays._sum.amount ?? 0
-      const balance = credited - amortized
-      const newCredit = cleanPayments.filter((p) => p.method === "CREDITO").reduce((a, p) => a + p.amount, 0)
-      if (customer.creditLimit > 0 && balance + newCredit > customer.creditLimit)
+      // Verificação rápida do limite (UX) - a decisão FINAL é re-verificada
+      // DENTRO da transacção, mais abaixo (v2.6 D3).
+      const { balance } = await saldoFiacao(customerId, db)
+      const newCredit = round2(cleanPayments.filter((p) => p.method === "CREDITO").reduce((a, p) => a + p.amount, 0))
+      if (customer.creditLimit > 0 && round2(balance + newCredit) > customer.creditLimit)
         return NextResponse.json(
           { error: `Limite de fiação excedido! ${customer.name} deve ${(balance).toFixed(2)} MT, limite ${customer.creditLimit.toFixed(2)} MT.` },
           { status: 400 }
         )
     }
 
-    // Comissão do vendedor
+    // Comissão do vendedor (v2.6 D2: arredondada a 2 decimais)
     const seller = await db.user.findUnique({ where: { id: userId } })
-    const commission = seller ? (total * seller.commissionPct) / 100 : 0
+    const commission = seller ? round2((total * seller.commissionPct) / 100) : 0
 
     // Criação atómica: contador + venda + baixa de stock NA MESMA transacção.
     // A baixa usa updateMany condicional (stock >= qty) - impossível ficar negativa
@@ -215,6 +230,25 @@ export async function POST(req: NextRequest) {
           const v = await tx.productVariant.findUnique({ where: { id: item.variantId } })
           throw new StockError(`Stock insuficiente para ${v?.color ?? v?.size ?? "produto"} (disp: ${v?.stock ?? 0})`)
         }
+      }
+
+      // v2.6 (D3 da auditoria): o limite de fiação passou a verificar-se
+      // DENTRO da transacção. O UPDATE na linha do cliente funciona como
+      // tranca (row lock) até ao fim da transacção - duas vendas a crédito
+      // simultâneas ao mesmo cliente fazem fila, e a segunda vê o saldo já
+      // gravado pela primeira. Antes lia-se o saldo fora da transacção e
+      // duas vendas simultâneas podiam passar ambas o limite.
+      if (hasCredit && customerId) {
+        await tx.customer.updateMany({
+          where: { id: customerId },
+          data: { updatedAt: new Date() }, // só para obter a tranca da linha
+        })
+        const { balance } = await saldoFiacao(customerId, tx)
+        const newCredit = round2(cleanPayments.filter((p) => p.method === "CREDITO").reduce((a, p) => a + p.amount, 0))
+        if (customer && customer.creditLimit > 0 && round2(balance + newCredit) > customer.creditLimit)
+          throw new LimiteError(
+            `Limite de fiação excedido! ${customer.name} deve ${(balance).toFixed(2)} MT, limite ${customer.creditLimit.toFixed(2)} MT.`
+          )
       }
 
       const counter = await tx.counter.upsert({
@@ -250,7 +284,7 @@ export async function POST(req: NextRequest) {
                   variantLabel: [v.color, v.size].filter(Boolean).join(" · ") || null,
                   qty: Math.floor(Number(i.qty) || 0),
                   unitPrice: unitario,
-                  total: unitario * (Math.floor(Number(i.qty) || 0)),
+                  total: round2(unitario * (Math.floor(Number(i.qty) || 0))),
                 }
               })
             ),
@@ -276,6 +310,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(sale)
   } catch (e) {
     if (e instanceof StockError)
+      return NextResponse.json({ error: e.message }, { status: 400 })
+    if (e instanceof LimiteError)
       return NextResponse.json({ error: e.message }, { status: 400 })
     if (e instanceof AutorizacaoError)
       return NextResponse.json({ error: e.message }, { status: 403 })

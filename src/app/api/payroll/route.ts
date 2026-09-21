@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
-import { monthRangeMZ } from "@/lib/tz"
+import { monthRangeMZ, currentMonthMZ } from "@/lib/tz"
+import { round2 } from "@/lib/money"
 
 // GET /api/payroll?month=YYYY-MM - folha: Salário + Comissões − Vales (só gerente)
 export async function GET(req: NextRequest) {
@@ -11,7 +12,10 @@ export async function GET(req: NextRequest) {
     if (session.role !== "GERENTE") return forbidden()
 
     const { searchParams } = new URL(req.url)
-    const monthStr = searchParams.get("month") ?? new Date().toISOString().slice(0, 7)
+    // v2.6 (D9): o mês por omissão vem do relógio de MAPUTO, não do UTC do
+    // servidor - entre 00:00 e 01:59 de Maputo no dia 1, o UTC ainda estava
+    // no mês anterior e a folha abria no mês errado.
+    const monthStr = searchParams.get("month") ?? currentMonthMZ()
     const [y, m] = monthStr.split("-").map(Number)
     if (!y || !m || m < 1 || m > 12)
       return NextResponse.json({ error: "Mês inválido" }, { status: 400 })
@@ -31,9 +35,10 @@ export async function GET(req: NextRequest) {
 
     const rows = users.map((u) => {
       const mySales = sales.filter((s) => s.userId === u.id)
-      const salesTotal = mySales.reduce((a, s) => a + s.total, 0)
-      const commissions = mySales.reduce((a, s) => a + s.commission, 0)
-      const valesTotal = vales.filter((v) => v.userId === u.id).reduce((a, v) => a + v.amount, 0)
+      // v2.6 (D2): somas arredondadas a 2 decimais
+      const salesTotal = round2(mySales.reduce((a, s) => a + s.total, 0))
+      const commissions = round2(mySales.reduce((a, s) => a + s.commission, 0))
+      const valesTotal = round2(vales.filter((v) => v.userId === u.id).reduce((a, v) => a + v.amount, 0))
       return {
         userId: u.id,
         name: u.name,
@@ -43,7 +48,7 @@ export async function GET(req: NextRequest) {
         salesTotal,
         commissions,
         vales: valesTotal,
-        toPay: u.baseSalary + commissions - valesTotal,
+        toPay: round2(u.baseSalary + commissions - valesTotal),
       }
     })
 

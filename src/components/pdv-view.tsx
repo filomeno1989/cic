@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { mt, variantLabel } from "@/lib/format";
-import { getCachedProducts, cacheProducts, cacheCustomers, getCachedCustomers, suspendSale, getSuspended, resumeSuspended, enqueueSale, syncQueue, type OfflineSale, type SuspendedSale } from "@/lib/offline";
+import { getCachedProducts, cacheProducts, cacheCustomers, getCachedCustomers, suspendSale, getSuspended, resumeSuspended, enqueueSale, syncQueue, getRejected, clearRejected, storageComProblemas, type OfflineSale, type SuspendedSale } from "@/lib/offline";
 import { PaymentDialog, type PayLine } from "@/components/payment-dialog";
 import { ReceiptDialog, type StoreInfo } from "@/components/receipt";
 import { ManagerPinDialog } from "@/components/manager-pin";
 import type { CartItem, ProductVariantFlat, SaleFlat, CustomerFlat, SessionUser } from "@/lib/types";
 import {
-  Search, Pause, Play, Trash2, Plus, Minus, ShoppingCart, WifiOff, PackageOpen, Percent, Users,
+  Search, Pause, Play, Trash2, Plus, Minus, ShoppingCart, WifiOff, PackageOpen, Percent, Users, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -46,6 +46,9 @@ export function PdvView({
   const [suspended, setSuspended] = useState<SuspendedSale[]>([]);
   const [pinOpen, setPinOpen] = useState(false);
   const [payKey, setPayKey] = useState(0); // remonta PaymentDialog a cada abertura (estado limpo)
+  // v2.6 (D8): vendas offline que o servidor RECUSOU - cartão visível no PDV
+  const [recusadas, setRecusadas] = useState(() => getRejected());
+  const [memoriaCheia, setMemoriaCheia] = useState(false);
 
   const reloadCatalog = useCallback(async (force = false) => {
     if (!online && !force) return;
@@ -266,7 +269,18 @@ export function PdvView({
         ...payload,
         clientCreatedAt: new Date().toISOString(),
       };
-      enqueueSale(offlineSale);
+      // v2.6 (D8): a escrita pode falhar (Safari privado / memória cheia) -
+      // antes a venda perdia-se em silêncio. Agora grita-se na hora.
+      const guardada = enqueueSale(offlineSale);
+      if (!guardada || storageComProblemas()) {
+        setMemoriaCheia(true);
+        toast({
+          title: "AVISO: venda pode NÃO ter ficado guardada!",
+          description: "Memória do aparelho cheia ou modo privado. Ligue a rede e refaça a venda online - não confie nesta cópia offline.",
+          variant: "destructive",
+          duration: 12000,
+        });
+      }
       const localSale: SaleFlat = {
         id: offlineSale.localId,
         number: 0,
@@ -305,7 +319,10 @@ export function PdvView({
     if (!wasOffline) {
       reloadCatalog();
       onStockChanged();
-      void syncQueue().then((r) => { if (r.synced > 0) onStockChanged(); });
+      void syncQueue().then((r) => {
+        setRecusadas(getRejected()); // v2.6 (D8): refresca o cartão de recusadas
+        if (r.synced > 0) onStockChanged();
+      });
     }
   };
 
@@ -339,6 +356,45 @@ export function PdvView({
           <div className="flex items-center gap-2 text-xs bg-amber-500/10 text-amber-600 rounded-lg px-3 py-2 mb-3">
             <WifiOff className="w-3.5 h-3.5" />
             Modo offline - a vender com catálogo em cache. As vendas ficam guardadas e sincronizam sozinhas.
+          </div>
+        )}
+
+        {memoriaCheia && (
+          <div className="flex items-start gap-2 text-xs bg-destructive/10 text-destructive rounded-lg px-3 py-2 mb-3">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span><b>Armazenamento do aparelho com problemas</b> (modo privado? memória cheia?) - as vendas offline podem NÃO ficar guardadas. Prefira vender com rede ligada.</span>
+          </div>
+        )}
+
+        {/* v2.6 (D8 da auditoria): vendas recusadas pelo servidor - antes
+            acumulavam invisíveis; agora o operador vê motivo e pode limpar */}
+        {recusadas.length > 0 && (
+          <div className="bg-destructive/10 rounded-lg px-3 py-2.5 mb-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-xs font-semibold text-destructive">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                {recusadas.length} venda(s) offline RECUSADA(S) pelo servidor - não entraram no sistema
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => { clearRejected(); setRecusadas([]); toast({ title: "Registo de recusadas limpo", description: "Confirme no papel/WhatsApp se alguma precisa ser refeita." }); }}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1" /> Limpar registo
+              </Button>
+            </div>
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {recusadas.map((r) => (
+                <div key={r.localId} className="text-[11px] text-muted-foreground flex items-center gap-2 bg-background/60 rounded px-2 py-1">
+                  <RefreshCw className="w-3 h-3 text-destructive shrink-0" />
+                  <span className="font-medium text-foreground">{mt(r.items.reduce((a, i) => a + i.unitPrice * i.qty, 0))}</span>
+                  <span>{new Date(r.clientCreatedAt).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className="truncate">· {r.reason}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">Estas vendas NÃO foram registadas nem baixaram stock. Refaça-as online (verifique stock/fiação) e depois limpe o registo.</p>
           </div>
         )}
 

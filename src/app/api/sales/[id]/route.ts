@@ -38,13 +38,28 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     if (!sale) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 })
     if (sale.status === "ANULADA") return NextResponse.json({ error: "Venda já anulada" }, { status: 400 })
 
-    await db.$transaction([
-      db.sale.update({ where: { id }, data: { status: "ANULADA", commission: 0 } }),
-      // Devolve stock
-      ...sale.items.map((i) =>
-        db.productVariant.update({ where: { id: i.variantId }, data: { stock: { increment: i.qty } } })
-      ),
-    ])
+    // v2.6 (D3 da auditoria): a decisão de anular passou a ser um UPDATE
+    // condicional DENTRO da transacção (o mesmo padrão das vendas). Antes
+    // lia-se o status fora da transacção - duas anulações simultâneas
+    // (duplo-clique, dois aparelhos) passavam ambas a verificação e
+    // devolviam o stock DUAS VEZES. Agora só a primeira ganha: a segunda
+    // encontra status=ANULADA no UPDATE e devolve 400 sem tocar no stock.
+    const anulada = await db.$transaction(async (tx) => {
+      const upd = await tx.sale.updateMany({
+        where: { id, status: "CONCLUIDA" },
+        data: { status: "ANULADA", commission: 0 },
+      })
+      if (upd.count === 0) return false
+      // Devolve stock (só chega aqui quem ganhou a corrida)
+      for (const i of sale.items) {
+        await tx.productVariant.update({
+          where: { id: i.variantId },
+          data: { stock: { increment: i.qty } },
+        })
+      }
+      return true
+    })
+    if (!anulada) return NextResponse.json({ error: "Venda já anulada" }, { status: 400 })
 
     return NextResponse.json({ ok: true, reason: reason || null })
   } catch {

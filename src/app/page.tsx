@@ -11,7 +11,7 @@ import { RhView } from "@/components/rh-view";
 import { RelatoriosView } from "@/components/relatorios-view";
 import { DefinicoesView } from "@/components/definicoes-view";
 import { type StoreInfo } from "@/components/receipt";
-import { cacheSettings, getCachedSettings, getQueue, getRejected, syncQueue } from "@/lib/offline";
+import { cacheSettings, getCachedSettings, getQueue, getRejected, syncQueue, FALHAS_PARA_ALERTA } from "@/lib/offline";
 import type { SessionUser, ProductVariantFlat } from "@/lib/types";
 
 const SESSION_KEY = "cic_session_user";
@@ -63,7 +63,8 @@ export default function Home() {
     if (!silent) setSyncing(true);
     try {
       const result = await syncQueue();
-      setPendingCount(getQueue().length);
+      const pendentes = getQueue().length;
+      setPendingCount(pendentes);
       if (result.synced > 0) {
         setLastSync(new Date().toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }));
         setSalesVersion((v) => v + 1);
@@ -73,6 +74,16 @@ export default function Home() {
         const rejectedItems = getRejected();
         const reason = rejectedItems[rejectedItems.length - 1]?.reason ?? "recusada pelo servidor";
         setSyncAlert(`${result.rejected} venda(s) offline recusada(s): ${reason}`);
+      } else if (result.falhasSeguidas >= FALHAS_PARA_ALERTA) {
+        // v2.6 (D7 da auditoria): alerta PERSISTENTE quando a fila não
+        // sincroniza há vários ciclos seguidos (rede da loja meia-morta).
+        // Antes ficava "pendente" eterno sem ninguém saber. Re-alerta a
+        // cada 5 ciclos falhados para não martelar o ecrã.
+        if (result.falhasSeguidas === FALHAS_PARA_ALERTA || (result.falhasSeguidas - FALHAS_PARA_ALERTA) % 5 === 0) {
+          setSyncAlert(`Rede instável - ${pendentes} venda(s) por sincronizar. Tentamos automaticamente; se persistir, verifique a internet.`);
+        }
+      } else if (result.synced > 0) {
+        setSyncAlert(null); // rede voltou e sincronizou - limpa o aviso de rede
       }
     } catch { /* silencioso */ } finally {
       syncingRef.current = false;

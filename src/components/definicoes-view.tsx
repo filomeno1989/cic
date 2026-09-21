@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2, Save, Printer, DatabaseBackup, Upload, Download, AlertTriangle, CheckCircle2, Trash2,
   QrCode, Copy, Send, ExternalLink, Store,
@@ -34,6 +35,9 @@ export function DefinicoesView({
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [pendingRestore, setPendingRestore] = useState<{ name: string; payload: unknown; meta: { exportedAt?: string; counts?: Record<string, number> } } | null>(null);
+  // v2.6 (D6): por omissão o restauro PRESERVA contas de funcionários e
+  // definições da loja - substituir é opt-in (checkbox no diálogo).
+  const [restaurarContas, setRestaurarContas] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // P2: Portal do cliente /loja - QR + link com mensagem bonita
@@ -103,10 +107,10 @@ export function DefinicoesView({
     }
   };
 
-  const exportBackup = async () => {
+  const exportBackup = async (semFotos = false) => {
     setExporting(true);
     try {
-      const res = await fetch("/api/backup");
+      const res = await fetch(`/api/backup${semFotos ? "?semFotos=1" : ""}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro");
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -115,17 +119,24 @@ export function DefinicoesView({
       const now = new Date();
       const pad = (x: number) => String(x).padStart(2, "0");
       a.href = url;
-      a.download = `backup-cic-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`;
+      a.download = `backup-cic${semFotos ? "-sem-fotos" : ""}-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`;
       a.click();
       URL.revokeObjectURL(url);
       localStorage.setItem(LAST_BACKUP_KEY, now.toISOString());
       toast({
         title: "Backup descarregado",
-        description: `Guarda este ficheiro em local seguro (WhatsApp, e-mail ou pen). ${data.meta?.counts ? `${data.meta.counts.vendas} vendas, ${data.meta.counts.produtos} produtos.` : ""}`,
+        description: `Guarda este ficheiro em local seguro (WhatsApp, e-mail ou pen). ${data.meta?.counts ? `${data.meta.counts.vendas} vendas, ${data.meta.counts.produtos} produtos${semFotos ? " (sem fotos)" : ""}.` : ""}`,
       });
       setTimeout(() => window.location.reload(), 800); // refresca "último backup"
     } catch (e) {
-      toast({ title: e instanceof Error ? e.message : "Erro no backup", variant: "destructive" });
+      // v2.6 (D5): backup grande demais (413) - tenta de novo sem fotos
+      const msg = e instanceof Error ? e.message : "Erro no backup";
+      if (!semFotos && msg.includes("fotos")) {
+        toast({ title: "Backup grande - a tentar SEM fotos", description: "As fotos não cabem no ficheiro. Vai exportar os dados sem elas.", variant: "destructive" });
+        setExporting(false);
+        return exportBackup(true);
+      }
+      toast({ title: msg, variant: "destructive" });
     } finally {
       setExporting(false);
     }
@@ -152,12 +163,13 @@ export function DefinicoesView({
       const res = await fetch("/api/backup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backup: pendingRestore.payload }),
+        body: JSON.stringify({ backup: pendingRestore.payload, incluirContas: restaurarContas }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro");
       toast({ title: "Backup restaurado", description: data.message });
       setPendingRestore(null);
+      setRestaurarContas(false);
       setTimeout(() => window.location.reload(), 1200);
     } catch (e) {
       toast({ title: e instanceof Error ? e.message : "Erro ao restaurar", variant: "destructive" });
@@ -319,7 +331,7 @@ export function DefinicoesView({
             </div>
 
             <div className="grid sm:grid-cols-2 gap-2">
-              <Button variant="outline" onClick={exportBackup} disabled={exporting || restoring}>
+              <Button variant="outline" onClick={() => exportBackup()} disabled={exporting || restoring}>
                 {exporting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />} Descarregar Backup
               </Button>
               <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={exporting || restoring}>
@@ -328,7 +340,7 @@ export function DefinicoesView({
               <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => onFilePicked(e.target.files?.[0] ?? null)} />
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Guardar o ficheiro .json no WhatsApp, e-mail ou Google Drive. <b>Restaurar substitui TODOS os dados actuais</b> pelos do ficheiro - use apenas se necessário (ex: telefone novo).
+              Guardar o ficheiro .json no WhatsApp, e-mail ou Google Drive. <b>Restaurar substitui os dados actuais</b> pelos do ficheiro (contas e definições são preservadas, salvo escolha no diálogo) - use apenas se necessário (ex: telefone novo).
             </p>
           </>
         ) : (
@@ -405,11 +417,18 @@ export function DefinicoesView({
             <DialogTitle className="flex items-center gap-2 text-destructive"><AlertTriangle className="w-5 h-5" /> Restaurar backup?</DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-2 text-sm">
-                <p>Isto vai <b>APAGAR todos os dados actuais</b> e substituir pelos do ficheiro:</p>
+                <p>Isto vai <b>APAGAR todos os dados actuais</b> (vendas, stock, clientes, fiação) e substituir pelos do ficheiro:</p>
                 <p className="font-mono text-xs bg-muted rounded p-2 break-all">{pendingRestore?.name}</p>
                 {pendingRestore?.meta?.exportedAt && (
                   <p className="text-xs">Backup feito em {new Date(pendingRestore.meta.exportedAt).toLocaleString("pt-PT")}{pendingRestore.meta.counts ? ` · ${pendingRestore.meta.counts.vendas ?? 0} vendas · ${pendingRestore.meta.counts.clientes ?? 0} clientes` : ""}.</p>
                 )}
+                <p className="text-xs"><b>Por omissão, as contas de funcionários (PINs) e as definições da loja são PRESERVADAS</b> - apenas são recriadas contas do backup que já não existam (sem acesso, só histórico).</p>
+                <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 p-2">
+                  <Checkbox id="restaurarContas" checked={restaurarContas} onCheckedChange={(v) => setRestaurarContas(v === true)} className="mt-0.5" />
+                  <Label htmlFor="restaurarContas" className="text-xs font-normal cursor-pointer">
+                    Substituir TAMBÉM as contas de funcionários e as definições da loja pelos do backup (os PINs actuais serão trocados e a sua sessão pode fechar).
+                  </Label>
+                </div>
                 <p className="text-destructive text-xs font-semibold">Tudo o que foi registado DEPOIS desse backup será perdido.</p>
               </div>
             </DialogDescription>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
+import { round2 } from "@/lib/money"
 
 // GET /api/customers/[id] - perfil + histórico de compras + fiação
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -9,7 +10,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const customer = await db.customer.findUnique({ where: { id } })
     if (!customer) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 })
 
-    const [sales, pays] = await Promise.all([
+    const [sales, pays, saldoRows] = await Promise.all([
       db.sale.findMany({
         where: { customerId: id },
         orderBy: { createdAt: "desc" },
@@ -25,17 +26,25 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         orderBy: { date: "desc" },
         take: 100,
       }),
+      // v2.6 (D4): o saldo é somado NA BASE DE DADOS sobre TODA a história -
+      // antes usava só os últimos 100 registos (cliente com muito histórico
+      // mostrava saldo errado) e somava em JavaScript.
+      db.$queryRaw<Array<{ credited: number; amortized: number }>>`
+        SELECT
+          (SELECT COALESCE(SUM(p.amount), 0) FROM "Payment" p
+            JOIN "Sale" s ON s.id = p."saleId"
+            WHERE s."customerId" = ${id} AND p.method = 'CREDITO'
+              AND s.status = 'CONCLUIDA' AND s."isCredit" = TRUE) AS credited,
+          (SELECT COALESCE(SUM(amount), 0) FROM "CreditPayment"
+            WHERE "customerId" = ${id}) AS amortized`,
     ])
 
-    const credited = sales
-      .filter((s) => s.status === "CONCLUIDA" && s.isCredit)
-      .flatMap((s) => s.payments.filter((p) => p.method === "CREDITO"))
-      .reduce((a, p) => a + p.amount, 0)
-    const amortized = pays.reduce((a, p) => a + p.amount, 0)
+    const r0 = saldoRows[0] ?? { credited: 0, amortized: 0 }
+    const balance = round2(Number(r0.credited) - Number(r0.amortized))
 
     return NextResponse.json({
       ...customer,
-      balance: credited - amortized,
+      balance,
       sales: sales.map((s) => ({
         id: s.id, number: s.number, total: s.total, status: s.status,
         isCredit: s.isCredit, priceType: s.priceType, createdAt: s.createdAt,

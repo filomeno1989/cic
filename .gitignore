@@ -55,3 +55,4 @@ server.log
 # v2.5 (S9): variáveis de ambiente nunca mais no repositório
 .env
 .env.*
+tool-results/

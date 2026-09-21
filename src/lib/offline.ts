@@ -43,9 +43,33 @@ function read<T>(key: string): T[] {
   }
 }
 
-function write<T>(key: string, value: T) {
-  if (typeof window === "undefined") return
-  localStorage.setItem(key, JSON.stringify(value))
+// v2.6 (D8 da auditoria): a escrita no localStorage pode FALHAR - Safari
+// privado, memória do aparelho cheia, modo incógnito. Antes a venda offline
+// perdia-se silenciosamente: nem o vendedor nem o dono sabiam. Agora a
+// escrita devolve false e a interface AVISA em voz alta.
+function write<T>(key: string, value: T): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+    return true
+  } catch {
+    escreveuSemEspaco = true
+    return false
+  }
+}
+
+// flag global de armazenamento avariado (Safari privado / quota cheia)
+let escreveuSemEspaco = false
+export function storageComProblemas(): boolean {
+  if (typeof window === "undefined") return false
+  if (escreveuSemEspaco) return true
+  try {
+    localStorage.setItem("cic_storage_probe", "1")
+    localStorage.removeItem("cic_storage_probe")
+    return false
+  } catch {
+    return true
+  }
 }
 
 // ---------- Fila de vendas offline ----------
@@ -53,10 +77,10 @@ export function getQueue(): OfflineSale[] {
   return read<OfflineSale>(QUEUE_KEY)
 }
 
-export function enqueueSale(sale: OfflineSale) {
+export function enqueueSale(sale: OfflineSale): boolean {
   const q = getQueue()
   q.push(sale)
-  write(QUEUE_KEY, q)
+  return write(QUEUE_KEY, q)
 }
 
 export function removeFromQueue(localId: string) {
@@ -133,7 +157,7 @@ export function resumeSuspended(id: string): SuspendedSale | null {
 // rejected = vendas que o servidor RECUSOU permanentemente (ex: stock insuficiente
 // entretanto, fiação acima do limite). Ficam na lista "rejeitadas" p/ o utilizador
 // ver - NÃO voltam a tentar infinitamente como antes.
-export type SyncResult = { synced: number; failed: number; rejected: number }
+export type SyncResult = { synced: number; failed: number; rejected: number; falhasSeguidas: number }
 
 const REJECTED_KEY = "cic_offline_rejected_v1"
 
@@ -151,9 +175,19 @@ export function clearRejected() {
   write(REJECTED_KEY, [])
 }
 
+// v2.6 (D7): ciclos de sincronização que falham seguidos (rede instável da
+// Vodacom/Movitel). O timeout de 15s já existe (v2.4); o que faltava era o
+// AVISO PERSISTENTE ao operador depois de várias falhas - antes a fila
+// ficava "pendente" eternamente sem ninguém saber.
+let falhasSeguidas = 0
+export const FALHAS_PARA_ALERTA = 3
+
 export async function syncQueue(): Promise<SyncResult> {
   const queue = getQueue()
-  if (queue.length === 0) return { synced: 0, failed: 0, rejected: 0 }
+  if (queue.length === 0) {
+    falhasSeguidas = 0
+    return { synced: 0, failed: 0, rejected: 0, falhasSeguidas: 0 }
+  }
   let synced = 0
   let failed = 0
   let rejected = 0
@@ -197,5 +231,8 @@ export async function syncQueue(): Promise<SyncResult> {
       break // rede caiu a meio - tenta no próximo ciclo
     }
   }
-  return { synced, failed, rejected }
+  // D7: contador de ciclos com falha - limpa-se quando algo sincroniza
+  if (synced > 0) falhasSeguidas = 0
+  else if (failed > 0) falhasSeguidas++
+  return { synced, failed, rejected, falhasSeguidas }
 }

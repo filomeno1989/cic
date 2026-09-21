@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized } from "@/lib/auth"
 import { startOfTodayMZ } from "@/lib/tz"
+import { round2 } from "@/lib/money"
 
 // P2: esperado calculado AUTOMATICAMENTE por carteira a partir das
 // vendas/amortizações do turno. O caixa continua cego - o resultado
@@ -30,6 +31,9 @@ async function computeExpected(userId: string) {
     }),
   ])
 
+  // v2.6 (D2): somas de dinheiro arredondadas a 2 decimais - sem isto, o
+  // esperado do fecho aparecia como 1500.0000000000002 e a falta/sobra da
+  // conciliação mostrava diferenças fantasma de 0,01 MT.
   let cash = 0, pos = 0, mpesa = 0, emola = 0, mkesh = 0, total = 0
   for (const s of sales) {
     for (const p of s.payments) {
@@ -51,7 +55,7 @@ async function computeExpected(userId: string) {
   const expenseTotal = expenses.reduce((a, e) => a + e.amount, 0)
   cash -= expenseTotal // despesas pagas do caixa reduzem o esperado
 
-  return { since, cash, pos, mpesa, emola, mkesh, total, salesCount: sales.length }
+  return { since, cash: round2(cash), pos: round2(pos), mpesa: round2(mpesa), emola: round2(emola), mkesh: round2(mkesh), total: round2(total), salesCount: sales.length }
 }
 
 // GET /api/closings - histórico (gerente vê diferenças; caixa vê só os seus totais contados)
@@ -100,21 +104,21 @@ export async function POST(req: NextRequest) {
     const closing = await db.cashClosing.create({
       data: {
         userId: session.id,
-        countedCash: num(countedCash),
-        countedPos: num(countedPos),
-        countedMpesa: num(countedMpesa),
-        countedEmola: num(countedEmola),
-        countedMkesh: num(countedMkesh),
+        countedCash: round2(num(countedCash)),
+        countedPos: round2(num(countedPos)),
+        countedMpesa: round2(num(countedMpesa)),
+        countedEmola: round2(num(countedEmola)),
+        countedMkesh: round2(num(countedMkesh)),
         expectedCash: expected.cash,
         expectedPos: expected.pos,
         expectedMpesa: expected.mpesa,
         expectedEmola: expected.emola,
         expectedMkesh: expected.mkesh,
-        diffCash: num(countedCash) - expected.cash,
-        diffPos: num(countedPos) - expected.pos,
-        diffMpesa: num(countedMpesa) - expected.mpesa,
-        diffEmola: num(countedEmola) - expected.emola,
-        diffMkesh: num(countedMkesh) - expected.mkesh,
+        diffCash: round2(num(countedCash) - expected.cash),
+        diffPos: round2(num(countedPos) - expected.pos),
+        diffMpesa: round2(num(countedMpesa) - expected.mpesa),
+        diffEmola: round2(num(countedEmola) - expected.emola),
+        diffMkesh: round2(num(countedMkesh) - expected.mkesh),
         salesTotal: expected.total,
         note: note || null,
       },

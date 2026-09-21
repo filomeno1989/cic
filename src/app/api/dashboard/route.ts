@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized } from "@/lib/auth"
 import { startOfDayMZ, startOfTodayMZ } from "@/lib/tz"
+import { round2 } from "@/lib/money"
 
 // GET /api/dashboard - KPIs + alertas (validade, stock, devedores).
 // O papel (GERENTE/CAIXA) e o userId vêm da SESSÃO - o caixa nunca
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
     const startOfDay = startOfTodayMZ()
     const daysAgo7 = startOfDayMZ(-6)
 
-    const [todaySales, weekSales, variants, creditSales, amortizations, todayExpenses, todayAmorts] =
+    const [todaySales, weekSales, variants, todayExpenses, todayAmorts, creditedRows, amortizedRows] =
       await Promise.all([
         db.sale.findMany({
           where: {
@@ -37,11 +38,6 @@ export async function GET(req: NextRequest) {
             color: true, size: true, costPrice: true, product: { select: { name: true } },
           },
         }),
-        db.sale.findMany({
-          where: { isCredit: true, status: "CONCLUIDA" },
-          select: { customerId: true, customer: { select: { name: true } }, payments: { where: { method: "CREDITO" }, select: { amount: true } } },
-        }),
-        db.creditPayment.findMany({ select: { customerId: true, amount: true } }),
         db.expense.findMany({
           where: { date: { gte: startOfDay }, ...(isManager ? {} : { userId }) },
           select: { amount: true, category: true },
@@ -50,23 +46,40 @@ export async function GET(req: NextRequest) {
           where: { date: { gte: startOfDay }, ...(isManager ? {} : { userId }) },
           select: { amount: true, method: true },
         }),
+        // v2.6 (D4 da auditoria): devedores agregados NA BASE DE DADOS.
+        // Antes carregava TODA a história de vendas a crédito + TODAS as
+        // amortizações e somava em JavaScript - com anos de fiação a página
+        // ficava lenta. Agora: duas somas SQL por cliente (linhas = nº de
+        // clientes, não nº de vendas). Igual em Postgres e SQLite.
+        db.$queryRaw<Array<{ cid: string; name: string; credited: number }>>`
+          SELECT s."customerId" AS cid, c.name AS name, COALESCE(SUM(p.amount), 0) AS credited
+          FROM "Payment" p
+          JOIN "Sale" s ON s.id = p."saleId"
+          JOIN "Customer" c ON c.id = s."customerId"
+          WHERE p.method = 'CREDITO' AND s.status = 'CONCLUIDA' AND s."isCredit" = TRUE
+            AND s."customerId" IS NOT NULL
+          GROUP BY s."customerId", c.name`,
+        db.creditPayment.groupBy({
+          by: ["customerId"],
+          _sum: { amount: true },
+        }),
       ])
 
-    // KPIs de hoje
-    const todayTotal = todaySales.reduce((a, s) => a + s.total, 0)
+    // KPIs de hoje (v2.6 D2: tudo arredondado a 2 decimais)
+    const todayTotal = round2(todaySales.reduce((a, s) => a + s.total, 0))
     const todayCount = todaySales.length
-    const todayCash = todaySales.flatMap((s) => s.payments).filter((p) => p.method === "DINHEIRO").reduce((a, p) => a + (p.amount - p.change), 0)
-    const todayMobile = todaySales.flatMap((s) => s.payments).filter((p) => ["MPESA", "EMOLA", "MKESH"].includes(p.method)).reduce((a, p) => a + p.amount, 0)
-    const todayPos = todaySales.flatMap((s) => s.payments).filter((p) => p.method === "POS").reduce((a, p) => a + p.amount, 0)
-    const todayCredit = todaySales.flatMap((s) => s.payments).filter((p) => p.method === "CREDITO").reduce((a, p) => a + p.amount, 0)
-    const expenseTotal = todayExpenses.reduce((a, e) => a + e.amount, 0)
-    const amortTotal = todayAmorts.reduce((a, p) => a + p.amount, 0)
+    const todayCash = round2(todaySales.flatMap((s) => s.payments).filter((p) => p.method === "DINHEIRO").reduce((a, p) => a + (p.amount - p.change), 0))
+    const todayMobile = round2(todaySales.flatMap((s) => s.payments).filter((p) => ["MPESA", "EMOLA", "MKESH"].includes(p.method)).reduce((a, p) => a + p.amount, 0))
+    const todayPos = round2(todaySales.flatMap((s) => s.payments).filter((p) => p.method === "POS").reduce((a, p) => a + p.amount, 0))
+    const todayCredit = round2(todaySales.flatMap((s) => s.payments).filter((p) => p.method === "CREDITO").reduce((a, p) => a + p.amount, 0))
+    const expenseTotal = round2(todayExpenses.reduce((a, e) => a + e.amount, 0))
+    const amortTotal = round2(todayAmorts.reduce((a, p) => a + p.amount, 0))
 
     // Lucro (apenas gerente): vendas − custo das mercadorias − despesas
     let todayProfit: number | null = null
     if (isManager) {
-      const cost = todaySales.flatMap((s) => s.items).reduce((a, i) => a + i.variant.costPrice * i.qty, 0)
-      todayProfit = todayTotal - cost - expenseTotal
+      const cost = round2(todaySales.flatMap((s) => s.items).reduce((a, i) => a + i.variant.costPrice * i.qty, 0))
+      todayProfit = round2(todayTotal - cost - expenseTotal)
     }
 
     // Gráfico 7 dias
@@ -74,9 +87,9 @@ export async function GET(req: NextRequest) {
     for (let i = 6; i >= 0; i--) {
       const d = startOfDayMZ(-i)
       const next = startOfDayMZ(-i + 1)
-      const total = weekSales
+      const total = round2(weekSales
         .filter((s) => s.createdAt >= d && s.createdAt < next)
-        .reduce((a, s) => a + s.total, 0)
+        .reduce((a, s) => a + s.total, 0))
       chart.push({ day: d.toLocaleDateString("pt-PT", { weekday: "short", timeZone: "Africa/Maputo" }), total })
     }
 
@@ -104,24 +117,21 @@ export async function GET(req: NextRequest) {
         minStock: v.minStock,
       }))
 
-    // Devedores (fiação)
+    // Devedores (fiação) - agregado na BD (v2.6 D4), arredondado (D2)
     const byCustomer = new Map<string, { name: string; owed: number }>()
-    for (const s of creditSales) {
-      if (!s.customerId) continue
-      const owed = s.payments.reduce((a, p) => a + p.amount, 0)
-      const cur = byCustomer.get(s.customerId) ?? { name: s.customer?.name ?? "", owed: 0 }
-      cur.owed += owed
-      byCustomer.set(s.customerId, cur)
+    for (const r of creditedRows) {
+      if (!r.cid) continue
+      byCustomer.set(r.cid, { name: r.name, owed: round2(Number(r.credited)) })
     }
-    for (const a of amortizations) {
+    for (const a of amortizedRows) {
       const cur = byCustomer.get(a.customerId)
-      if (cur) cur.owed -= a.amount
+      if (cur) cur.owed = round2(cur.owed - (a._sum.amount ?? 0))
     }
     const debtors = [...byCustomer.entries()]
       .map(([id, v]) => ({ id, name: v.name, balance: v.owed }))
       .filter((d) => d.balance > 0.009)
       .sort((a, b) => b.balance - a.balance)
-    const debtTotal = debtors.reduce((a, d) => a + d.balance, 0)
+    const debtTotal = round2(debtors.reduce((a, d) => a + d.balance, 0))
 
     return NextResponse.json({
       today: {

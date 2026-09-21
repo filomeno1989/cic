@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized } from "@/lib/auth"
+import { round2 } from "@/lib/money"
+
+class StockError extends Error {}
 
 // POST /api/stock - entrada de mercadoria OU registo de quebra
 export async function POST(req: NextRequest) {
@@ -41,15 +44,20 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, direcao: "ENTRADA", delta, stock: novoStock })
       }
 
-      // Sobrava no sistema: retira como quebra de ajuste (não pode ficar negativa)
-      if (-delta > variant.stock)
-        return NextResponse.json({ error: "Contagem inválida" }, { status: 400 })
-      await db.$transaction([
-        db.stockLoss.create({
+      // Sobrava no sistema: retira como quebra de ajuste.
+      // v2.6 (D3): decremento CONDICIONAL dentro da transacção - antes a
+      // verificação era lida fora e duas correções simultâneas podiam
+      // negativar o stock.
+      await db.$transaction(async (tx) => {
+        const dec = await tx.productVariant.updateMany({
+          where: { id: variantId, stock: { gte: -delta } },
+          data: { stock: { decrement: -delta } },
+        })
+        if (dec.count === 0) throw new StockError("Contagem inválida (o stock mudou entretanto)")
+        await tx.stockLoss.create({
           data: { variantId, qty: -delta, reason: "AJUSTE", notes: notes || null, userId: session.id },
-        }),
-        db.productVariant.update({ where: { id: variantId }, data: { stock: { decrement: -delta } } }),
-      ])
+        })
+      })
       return NextResponse.json({ ok: true, direcao: "SAIDA", delta, stock: novoStock })
     }
 
@@ -59,12 +67,18 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Quantidade válida obrigatória" }, { status: 400 })
       if (quantity > variant.stock)
         return NextResponse.json({ error: "Quebra maior que stock atual" }, { status: 400 })
-      const [loss] = await db.$transaction([
-        db.stockLoss.create({
+      // v2.6 (D3): decremento CONDICIONAL dentro da transacção - duas quebras
+      // simultâneas do último artigo: só uma passa, o stock nunca fica negativo.
+      const loss = await db.$transaction(async (tx) => {
+        const dec = await tx.productVariant.updateMany({
+          where: { id: variantId, stock: { gte: quantity } },
+          data: { stock: { decrement: quantity } },
+        })
+        if (dec.count === 0) throw new StockError("Stock insuficiente (mudou entretanto)")
+        return tx.stockLoss.create({
           data: { variantId, qty: quantity, reason: reason || "OUTRO", notes: notes || null, userId: session.id },
-        }),
-        db.productVariant.update({ where: { id: variantId }, data: { stock: { decrement: quantity } } }),
-      ])
+        })
+      })
       return NextResponse.json(loss)
     }
 
@@ -91,7 +105,11 @@ export async function POST(req: NextRequest) {
       }),
     ])
     return NextResponse.json(entry)
-  } catch {
+  } catch (e) {
+    // v2.6 (D3): a corrida perdida (stock mudou entretanto) é recusa 400,
+    // não erro 500 - o utilizador vê a mensagem certa e recarrega o stock.
+    if (e instanceof StockError)
+      return NextResponse.json({ error: e.message }, { status: 400 })
     return NextResponse.json({ error: "Erro ao registar movimentação de stock" }, { status: 500 })
   }
 }
@@ -119,14 +137,14 @@ export async function GET(req: NextRequest) {
         _max: { date: true },
       }),
     ])
-    // total comprado por fornecedor (qty * custo da entrada)
+    // total comprado por fornecedor (qty * custo da entrada) - v2.6 (D2): arredondado
     const allEntries = await db.stockEntry.findMany({ select: { supplier: true, qty: true, costPrice: true } })
     const suppliers = supplierRows
       .map((s) => {
         const name = s.supplier ?? ""
-        const totalCost = allEntries
+        const totalCost = round2(allEntries
           .filter((e) => e.supplier === name)
-          .reduce((a, e) => a + e.qty * e.costPrice, 0)
+          .reduce((a, e) => a + e.qty * e.costPrice, 0))
         return {
           name,
           entries: s._count.id,

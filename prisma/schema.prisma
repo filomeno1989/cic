@@ -27,6 +27,9 @@ model User {
   expenses      Expense[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+
+  // v2.6 (D1 da auditoria): índices para os filtros mais usados
+  @@index([role, active])
 }
 
 model Vale {
@@ -37,6 +40,8 @@ model Vale {
   reason    String?
   paidOut   Boolean  @default(false) // descontado na folha
   date      DateTime @default(now())
+
+  @@index([userId, date]) // v2.6 (D1)
 }
 
 // ============ PRODUTOS E STOCK ============
@@ -84,6 +89,8 @@ model ProductVariant {
   stockLosses     StockLoss[]
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+
+  @@index([productId]) // v2.6 (D1)
 }
 
 model StockEntry {
@@ -95,6 +102,9 @@ model StockEntry {
   supplier  String?
   userId    String
   date      DateTime       @default(now())
+
+  @@index([variantId]) // v2.6 (D1): movimentos por variação
+  @@index([date])
 }
 
 model StockLoss {
@@ -106,6 +116,9 @@ model StockLoss {
   notes     String?
   userId    String
   date      DateTime       @default(now())
+
+  @@index([variantId]) // v2.6 (D1): movimentos por variação
+  @@index([date])
 }
 
 // ============ CLIENTES E FIACAO ============
@@ -131,6 +144,8 @@ model CreditPayment {
   userId     String
   note       String?
   date       DateTime @default(now())
+
+  @@index([customerId, date]) // v2.6 (D1): saldo por cliente
 }
 
 // ============ VENDAS ============
@@ -155,6 +170,13 @@ model Sale {
   payments          Payment[]
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+
+  // v2.6 (D1 da auditoria): o esquema de produção NÃO TINHA NENHUM índice -
+  // vendas por utilizador+data, por cliente e por data varriam a tabela toda.
+  @@index([userId, createdAt])
+  @@index([customerId])
+  @@index([createdAt])
+  @@index([status, isCredit])
 }
 
 model SaleItem {
@@ -168,6 +190,9 @@ model SaleItem {
   qty          Int
   unitPrice    Float
   total        Float
+
+  @@index([saleId]) // v2.6 (D1)
+  @@index([variantId])
 }
 
 model Payment {
@@ -178,6 +203,8 @@ model Payment {
   amount    Float
   change    Float    @default(0) // troco (dinheiro)
   reference String? // ID transacao M-Pesa/POS
+
+  @@index([saleId, method]) // v2.6 (D1): somas por carteira
 }
 
 model Counter {
@@ -194,6 +221,9 @@ model Expense {
   userId      String
   user        User     @relation(fields: [userId], references: [id])
   date        DateTime @default(now())
+
+  @@index([date]) // v2.6 (D1)
+  @@index([userId, date])
 }
 
 model CashClosing {
@@ -219,6 +249,8 @@ model CashClosing {
   salesTotal    Float
   note          String?
   closedAt      DateTime @default(now())
+
+  @@index([userId, closedAt]) // v2.6 (D1): "último fecho do caixa"
 }
 
 model Settings {

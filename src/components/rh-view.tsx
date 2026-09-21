@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { mt, fmtDate, fmtDateTime } from "@/lib/format";
+import { currentMonthMZ } from "@/lib/tz";
 import { fetchT } from "@/lib/http";
 import type { SessionUser } from "@/lib/types";
 import { UserPlus, HandCoins, Loader2, Trash2, FileSpreadsheet, Users2, Pencil, Archive, ArchiveRestore } from "lucide-react";
@@ -31,7 +32,7 @@ export function RhView({ user }: { user: SessionUser }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [vales, setVales] = useState<Vale[]>([]);
   const [payroll, setPayroll] = useState<Payroll | null>(null);
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => currentMonthMZ()); // v2.6 (D9): mês de MAPUTO, não UTC do aparelho
 
   const [empOpen, setEmpOpen] = useState(false);
   const [editingEmp, setEditingEmp] = useState<Employee | null>(null);

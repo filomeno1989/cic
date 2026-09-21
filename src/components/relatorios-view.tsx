@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { mt, fmtDateTime, methodLabel } from "@/lib/format";
+import { wallClockMZ, mzMidnight, mzEndOfDay, currentMonthMZ } from "@/lib/tz";
 import type { SaleFlat, SessionUser, ProductVariantFlat, CustomerFlat } from "@/lib/types";
 import { Receipt, Ban, Loader2, Search, FileDown, ShoppingCart, Wallet, Package, TrendingDown, Users2, CalendarDays } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -27,32 +28,28 @@ const PERIODS: Array<{ key: PeriodKey; label: string }> = [
   { key: "tudo", label: "Todo o histórico" },
 ];
 
+// v2.6 (D9 da auditoria): os períodos derivam do relógio de MAPUTO, não do
+// relógio do aparelho (que pode estar com fuso/hora errada). Os instantes
+// from/to são reais (corretos em qualquer fuso) e as etiquetas mostram a
+// data de Maputo.
 function periodRange(p: PeriodKey): { from: Date | null; to: Date | null; fromLabel: string; toLabel: string } {
-  const now = new Date();
-  const d = (x: Date) => x.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const w = wallClockMZ(); // getters UTC = hora de parede de Maputo
+  const Y = w.getUTCFullYear(), M = w.getUTCMonth(), D = w.getUTCDate();
+  const d = (x: Date) => x.toLocaleDateString("pt-PT", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric" });
   if (p === "hoje") {
-    const f = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return { from: f, to: null, fromLabel: d(f), toLabel: d(now) };
+    return { from: mzMidnight(Y, M, D), to: null, fromLabel: d(w), toLabel: d(w) };
   }
   if (p === "7d") {
-    const f = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
-    return { from: f, to: null, fromLabel: d(f), toLabel: d(now) };
+    return { from: mzMidnight(Y, M, D - 6), to: null, fromLabel: d(new Date(w.getTime() - 6 * 86400000)), toLabel: d(w) };
   }
   if (p === "mes") {
-    const f = new Date(now.getFullYear(), now.getMonth(), 1);
-    const t = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-    return { from: f, to: t, fromLabel: d(f), toLabel: d(t) };
+    return { from: mzMidnight(Y, M, 1), to: mzEndOfDay(Y, M, D), fromLabel: d(new Date(Date.UTC(Y, M, 1))), toLabel: d(w) };
   }
   if (p === "mespassado") {
-    const f = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const t = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-    return { from: f, to: t, fromLabel: d(f), toLabel: d(t) };
+    return { from: mzMidnight(Y, M - 1, 1), to: mzEndOfDay(Y, M - 1, new Date(Date.UTC(Y, M, 0)).getUTCDate()), fromLabel: d(new Date(Date.UTC(Y, M - 1, 1))), toLabel: d(new Date(Date.UTC(Y, M, 0))) };
   }
-  return { from: null, to: null, fromLabel: "Início", toLabel: d(now) };
+  return { from: null, to: null, fromLabel: "Início", toLabel: d(w) };
 }
-
-const fmtDay = (d: Date) => d.toISOString().slice(0, 10);
-const endOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
 
 export function RelatoriosView({
   user, store, onSalesChanged,
@@ -75,7 +72,7 @@ export function RelatoriosView({
   // PDF
   const [period, setPeriod] = useState<PeriodKey>("mes");
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
-  const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [payrollMonth, setPayrollMonth] = useState(() => currentMonthMZ());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,7 +143,7 @@ export function RelatoriosView({
       const { from, to, fromLabel, toLabel } = periodRange(period);
       const params = new URLSearchParams({ limit: "1000" });
       if (from) params.set("from", from.toISOString());
-      if (to) params.set("to", endOfDay(to).toISOString());
+      if (to) params.set("to", to.toISOString()); // to já sai de periodRange no fim do dia de Maputo
       const res = await fetch(`/api/sales?${params}`);
       if (!res.ok) throw new Error("Não foi possível carregar as vendas");
       const data: SaleFlat[] = await res.json();
@@ -194,7 +191,7 @@ export function RelatoriosView({
       if (!res.ok) throw new Error("Não foi possível carregar as despesas");
       let data: Expense[] = await res.json();
       if (from) data = data.filter((e) => new Date(e.date) >= from);
-      if (to) data = data.filter((e) => new Date(e.date) <= endOfDay(to));
+      if (to) data = data.filter((e) => new Date(e.date) <= to);
       await expensesReportPdf({
         store, generatedBy: user.name, fromLabel, toLabel,
         expenses: data.map((e) => ({

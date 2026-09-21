@@ -227,6 +227,9 @@ export function PdvView({
       priceType,
       discount,
       localId: `v-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, // v2.4: idempotência - o servidor nunca duplica esta venda
+      // v2.5 (S3): se um gerente autorizou o desconto >10%, o PIN acompanha a
+      // venda para o SERVIDOR confirmar de novo (a interface sozinha não basta).
+      ...(managerPin ? { gerentePin: managerPin } : {}),
       items: cart.map((i) => ({ variantId: i.variantId, qty: i.qty, unitPrice: i.unitPrice, name: i.name, variantLabel: i.variantLabel })),
       payments: lines.map((l) => ({ method: l.method, amount: l.amount, change: l.change ?? 0, reference: l.reference })),
     };

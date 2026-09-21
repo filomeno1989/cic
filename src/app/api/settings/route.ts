@@ -21,6 +21,29 @@ export async function GET() {
   }
 }
 
+// v2.5 (S4 da auditoria): URLs sociais viram links clicáveis no portal público
+// /loja - um valor tipo "javascript:..." seria executado no aparelho do cliente.
+// Só aceita https:// e domínios oficiais das redes (ou vazio = remover).
+function urlSocialValido(valor: unknown): boolean {
+  if (valor === undefined) return true
+  if (typeof valor !== "string") return false
+  const v = valor.trim()
+  if (!v) return true // vazio = limpar o campo
+  try {
+    const u = new URL(v)
+    const dom = u.hostname.toLowerCase().replace(/^www\./, "")
+    return (
+      u.protocol === "https:" &&
+      (dom === "instagram.com" || dom.endsWith(".instagram.com") ||
+       dom === "facebook.com" || dom.endsWith(".facebook.com") ||
+       dom === "fb.com" || dom.endsWith(".fb.com") ||
+       dom === "tiktok.com" || dom.endsWith(".tiktok.com"))
+    )
+  } catch {
+    return false
+  }
+}
+
 // PUT /api/settings - atualizar (só gerente - papel validado na SESSÃO)
 export async function PUT(req: NextRequest) {
   try {
@@ -53,6 +76,13 @@ export async function PUT(req: NextRequest) {
 
     if (expenseJson === null || productJson === null || brandJson === null)
       return NextResponse.json({ error: "Lista inválida" }, { status: 400 })
+
+    // v2.5 (S4): rejeitar URLs que não sejam https de Instagram/Facebook/TikTok
+    if (!urlSocialValido(instagramUrl) || !urlSocialValido(facebookUrl) || !urlSocialValido(tiktokUrl))
+      return NextResponse.json(
+        { error: "Link inválido. Use o endereço completo da rede (ex.: https://instagram.com/aloja) ou deixe vazio." },
+        { status: 400 }
+      )
 
     const settings = await db.settings.upsert({
       where: { id: "main" },

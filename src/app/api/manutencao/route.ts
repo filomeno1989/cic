@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bloqueado, segundosRestantes, registarFalha, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit";
+import { hashPin, pinLookupHmac } from "@/lib/pin";
 
 // ============================================================
 // PORTA DE EMERGÊNCIA DO PROPRIETÁRIO - /api/manutencao
@@ -75,9 +76,10 @@ export async function POST(req: NextRequest) {
       const alvoLc = alvo.toLowerCase();
       const user = all.find((u) => u.id === alvo || u.name.toLowerCase() === alvoLc);
       if (!user) return NextResponse.json({ error: `Conta «${alvo}» não encontrada (use acao=listar)` }, { status: 404 });
-      const clash = await db.user.findFirst({ where: { pin: novoPin, id: { not: user.id } } });
+      const clash = await db.user.findFirst({ where: { pinLookup: pinLookupHmac(novoPin), id: { not: user.id } } });
       if (clash) return NextResponse.json({ error: `Este PIN já é usado por ${clash.name}` }, { status: 400 });
-      await db.user.update({ where: { id: user.id }, data: { pin: novoPin, active: true } });
+      // v2.5 (S5): PIN gravado como hash scrypt + impressão digital HMAC
+      await db.user.update({ where: { id: user.id }, data: { pin: "", pinHash: hashPin(novoPin), pinLookup: pinLookupHmac(novoPin), active: true } });
       return NextResponse.json({ ok: true, mensagem: `PIN de «${user.name}» (${user.role}) redefinido. Pode entrar agora com o novo PIN.` });
     }
 
@@ -89,10 +91,10 @@ export async function POST(req: NextRequest) {
       if (!nome || !pinOk(novoPin)) {
         return NextResponse.json({ error: "Indique 'nome' e 'novoPin' (4-6 dígitos)" }, { status: 400 });
       }
-      const clash = await db.user.findFirst({ where: { pin: novoPin } });
+      const clash = await db.user.findFirst({ where: { pinLookup: pinLookupHmac(novoPin) } });
       if (clash) return NextResponse.json({ error: `Este PIN já é usado por ${clash.name}` }, { status: 400 });
       const user = await db.user.create({
-        data: { name: nome, pin: novoPin, role: "GERENTE", active: true, phone },
+        data: { name: nome, pin: "", pinHash: hashPin(novoPin), pinLookup: pinLookupHmac(novoPin), role: "GERENTE", active: true, phone },
       });
       return NextResponse.json({ ok: true, mensagem: `Conta de gerente «${user.name}» criada. Entre com o PIN e troque-o depois em Recursos Humanos.` });
     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
+import { hashPin, pinLookupHmac } from "@/lib/pin"
 
 // PUT /api/users/[id] - atualizar funcionário (só gerente - validado na SESSÃO)
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -18,7 +19,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       return NextResponse.json({ error: "PIN deve conter apenas números" }, { status: 400 })
     // PIN tem de ser ÚNICO - senão o login escolheria a pessoa errada
     if (pin) {
-      const clash = await db.user.findFirst({ where: { pin: String(pin), id: { not: id } } })
+      const clash = await db.user.findFirst({ where: { pinLookup: pinLookupHmac(String(pin)), id: { not: id } } })
       if (clash) return NextResponse.json({ error: `Este PIN já é usado por ${clash.name}` }, { status: 400 })
     }
 
@@ -43,7 +44,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       where: { id },
       data: {
         ...(name && { name }),
-        ...(pin && { pin: String(pin) }),
+        // v2.5 (S5): troca de PIN grava hash + impressão digital, nunca texto
+        ...(pin && { pin: "", pinHash: hashPin(String(pin)), pinLookup: pinLookupHmac(String(pin)) }),
         ...(role && { role: role === "GERENTE" ? "GERENTE" : "CAIXA" }),
         ...(baseSalary !== undefined && { baseSalary: Number(baseSalary) || 0 }),
         ...(commissionPct !== undefined && { commissionPct: Number(commissionPct) || 0 }),
@@ -51,7 +53,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         ...(active !== undefined && { active: !!active }),
       },
     })
-    return NextResponse.json(user)
+    const { pinHash: _h, pin: _p, ...userSeguro } = user
+    return NextResponse.json(userSeguro)
   } catch {
     return NextResponse.json({ error: "Erro ao atualizar funcionário" }, { status: 500 })
   }

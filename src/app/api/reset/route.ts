@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
+import { pinConfere, pinLookupHmac } from "@/lib/pin"
 
 /*
  * POST /api/reset - limpar TODA a base de dados (só gerente, com PIN).
@@ -18,10 +19,17 @@ export async function POST(req: NextRequest) {
     if (session.role !== "GERENTE")
       return forbidden("Apenas o gerente pode limpar a base de dados")
 
-    const gerente = await db.user.findFirst({
-      where: { pin: String(pin ?? ""), role: "GERENTE", active: true },
-    })
-    if (!gerente)
+    // v2.5 (S5): PIN conferido contra hash (scrypt) / legado - nunca por texto na BD
+    const gerente =
+      (await db.user.findFirst({
+        where: { pinLookup: pinLookupHmac(String(pin ?? "")), role: "GERENTE", active: true },
+        select: { id: true, pinHash: true, pin: true },
+      })) ??
+      (await db.user.findFirst({
+        where: { pin: String(pin ?? ""), role: "GERENTE", active: true },
+        select: { id: true, pinHash: true, pin: true },
+      }))
+    if (!gerente || !pinConfere(String(pin ?? ""), gerente))
       return NextResponse.json({ error: "PIN de gerente incorreto" }, { status: 401 })
 
     await db.$transaction(async (tx) => {

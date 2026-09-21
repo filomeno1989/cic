@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
+import { hashPin, pinLookupHmac } from "@/lib/pin"
+
+// Campos seguros para a resposta - NUNCA devolver pin/pinHash/pinLookup
+function seguro(u: { id: string; name: string; role: string; active: boolean; phone: string | null; baseSalary: number; commissionPct: number; createdAt: Date }) {
+  return {
+    id: u.id, name: u.name, role: u.role, active: u.active, phone: u.phone,
+    baseSalary: u.baseSalary, commissionPct: u.commissionPct, createdAt: u.createdAt,
+  }
+}
 
 // GET /api/users - lista funcionários (com estatísticas p/ RH) - SÓ GERENTE
 // v2.4: antes qualquer caixa autenticado via API via salários/comissões (falha da auditoria).
@@ -36,11 +45,13 @@ export async function POST(req: NextRequest) {
     if (!name || !pin) return NextResponse.json({ error: "Nome e PIN obrigatórios" }, { status: 400 })
     if (String(pin).length < 4) return NextResponse.json({ error: "PIN deve ter 4+ dígitos" }, { status: 400 })
     if (!/^\d+$/.test(String(pin))) return NextResponse.json({ error: "PIN deve conter apenas números" }, { status: 400 })
-    const exists = await db.user.findFirst({ where: { pin: String(pin) } })
+    const exists = await db.user.findFirst({ where: { pinLookup: pinLookupHmac(String(pin)) } })
     if (exists) return NextResponse.json({ error: "Este PIN já está em uso" }, { status: 400 })
+    // v2.5 (S5): o PIN é guardado como HASH scrypt + impressão digital HMAC.
+    // O PIN em texto nunca toca a base de dados.
     const user = await db.user.create({
       data: {
-        name, pin: String(pin),
+        name, pin: "", pinHash: hashPin(String(pin)), pinLookup: pinLookupHmac(String(pin)),
         role: role === "GERENTE" ? "GERENTE" : "CAIXA",
         baseSalary: Number(baseSalary) || 0,
         commissionPct: Number(commissionPct) || 0,
@@ -48,7 +59,7 @@ export async function POST(req: NextRequest) {
         isSystem: false, // contas criadas na RH nunca são de sistema
       },
     })
-    return NextResponse.json(user)
+    return NextResponse.json(seguro(user))
   } catch {
     return NextResponse.json({ error: "Erro ao criar funcionário" }, { status: 500 })
   }

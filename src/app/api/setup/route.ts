@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { hashPin, pinLookupHmac } from "@/lib/pin";
 
 /*
  * GET  /api/setup   → { needed: true } se a base de dados ainda não tem utilizadores
@@ -38,7 +39,8 @@ export async function POST(req: NextRequest) {
     const user = await db.user.create({
       data: {
         name: String(name).trim(),
-        pin: String(pin),
+        // v2.5 (S5): a primeira conta já nasce com PIN hasheado
+        pin: "", pinHash: hashPin(String(pin)), pinLookup: pinLookupHmac(String(pin)),
         role: "GERENTE",
         active: true,
         phone: phone || null,

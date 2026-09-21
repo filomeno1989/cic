@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 import { bloqueado, registarFalha, registarSucesso, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit"
+import { pinConfere } from "@/lib/pin"
 
 // DELETE /api/sales/[id] - anulação (estorno) exige SESSÃO de gerente + PIN de gerente
 // v2.4: antes bastava o PIN (sem limite de tentativas e sem verificar o papel na sessão).
@@ -20,7 +21,13 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     const { managerPin, reason } = body
     if (!managerPin) return NextResponse.json({ error: "PIN do gerente obrigatório" }, { status: 403 })
 
-    const manager = await db.user.findFirst({ where: { pin: String(managerPin), role: "GERENTE", active: true } })
+    // v2.5 (S5): PIN conferido contra o hash (scrypt) - a base de dados já não
+    // guarda o PIN em texto, por isso a procura é em memória conta a conta.
+    const gerentes = await db.user.findMany({
+      where: { role: "GERENTE", active: true },
+      select: { pinHash: true, pin: true },
+    })
+    const manager = gerentes.find((g) => pinConfere(String(managerPin), g))
     if (!manager) {
       registarFalha("anulacao", ip)
       return NextResponse.json({ error: "PIN de gerente inválido" }, { status: 403 })

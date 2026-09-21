@@ -135,7 +135,13 @@ export async function POST(req: NextRequest) {
       for (const u of arr(b.users))
         await tx.user.create({
           data: {
-            id: s(u.id), name: s(u.name), pin: s(u.pin),
+            id: s(u.id), name: s(u.name),
+            // v2.5 (S5): backups novos trazem pinHash+pinLookup (PIN nunca em texto).
+            // Backups antigos (só com pin em texto) restauram como legado - o login
+            // continua a aceitá-los até o PIN ser alterado nas Definições.
+            ...(u.pinHash
+              ? { pin: "", pinHash: s(u.pinHash), pinLookup: (u.pinLookup as string) || null }
+              : { pin: s(u.pin) }),
             role: u.role === "GERENTE" ? "GERENTE" : "CAIXA",
             active: u.active !== false, isSystem: u.isSystem === true,
             phone: (u.phone as string | null) ?? null,

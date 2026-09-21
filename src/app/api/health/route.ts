@@ -3,7 +3,9 @@ import { db } from "@/lib/db";
 
 // GET /api/health - verificação de estado (público, sem dados sensíveis)
 // Em caso de falha devolve apenas uma CATEGORIA de erro (sem segredos nem hostnames)
-// ?debug=<RECOVERY_KEY> inclui a mensagem real (com password removida) - só para o proprietário
+// v2.5 (S8): a chave de diagnóstico agora vai no HEADER x-debug-key (nunca no
+// URL - parâmetros ficam registados nos logs de acesso). Uso:
+//   curl -H "x-debug-key: <RECOVERY_KEY>" https://.../api/health
 export async function GET(req: NextRequest) {
   try {
     await db.settings.count();
@@ -24,7 +26,7 @@ export async function GET(req: NextRequest) {
     else if (/prepared statement/i.test(msg)) hint = "PGBOUNCER_FLAG";
     else if (/timeout|timed out/i.test(msg)) hint = "TIMEOUT";
     const body: Record<string, unknown> = { ok: false, hint, code: err?.code ?? null };
-    const dbg = new URL(req.url).searchParams.get("debug");
+    const dbg = req.headers.get("x-debug-key") ?? "";
     if (dbg && process.env.RECOVERY_KEY && dbg === process.env.RECOVERY_KEY) {
       body.debug = String(msg).replace(/:\/\/[^@/]*@/g, "://***@").slice(0, 600);
     }

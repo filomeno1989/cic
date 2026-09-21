@@ -1,11 +1,30 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized } from "@/lib/auth"
+import { bloqueado, segundosRestantes, registarFalha, registarSucesso, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit"
+import { pinConfere } from "@/lib/pin"
 
 type ItemIn = { variantId: string; qty: number; unitPrice: number }
 type PayIn = { method: string; amount: number; change?: number; reference?: string }
 
 class StockError extends Error {}
+class AutorizacaoError extends Error {}
+
+// v2.5 (S5 da auditoria): valida PIN de gerente com bloqueio de tentativas.
+// Usado no desconto >10% quando a sessão não é de gerente.
+async function pinGerenteValido(req: NextRequest, pin: unknown): Promise<boolean> {
+  const ip = ipDoPedido(req)
+  if (bloqueado("venda-desconto", ip)) return false
+  if (!pin || typeof pin !== "string") return false
+  const gerentes = await db.user.findMany({
+    where: { role: "GERENTE", active: true },
+    select: { pinHash: true, pin: true },
+  })
+  const ok = gerentes.some((g) => pinConfere(pin, g))
+  if (ok) registarSucesso("venda-desconto", ip)
+  else registarFalha("venda-desconto", ip)
+  return ok
+}
 
 // GET /api/sales?limit=100&from=ISO&to=ISO - lista vendas (filtros p/ relatórios)
 export async function GET(req: NextRequest) {
@@ -51,12 +70,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const {
       customerId, items, payments, discount, priceType,
-      offline, clientCreatedAt, localId,
+      offline, clientCreatedAt, localId, gerentePin,
     }: {
       userId?: string; customerId?: string | null
       items: ItemIn[]; payments: PayIn[]
       discount?: number; priceType?: string
       offline?: boolean; clientCreatedAt?: string; localId?: string
+      gerentePin?: string
     } = body
     const userId = session.id
 
@@ -96,8 +116,52 @@ export async function POST(req: NextRequest) {
     if (!cleanPayments.length)
       return NextResponse.json({ error: "Pagamentos inválidos" }, { status: 400 })
 
-    const subtotal = items.reduce((a, i) => a + (Number(i.unitPrice) || 0) * (Number(i.qty) || 0), 0)
-    const total = Math.max(0, subtotal - (Number(discount) || 0))
+    // v2.5 (S3 da auditoria): o preço vem SEMPRE da base de dados - o valor
+    // enviado pelo aparelho é ignorado. Um cliente alterado, ou uma venda
+    // editada no localStorage, não consegue gravar preços falsos.
+    // Regra idêntica à do PDV: grosso só se existir preço grosso E qty >= mínimo.
+    const precos = new Map<string, { preco: number; nome: string }>()
+    for (const item of items) {
+      const qty = Math.max(0, Math.floor(Number(item.qty) || 0))
+      const v = await db.productVariant.findUnique({
+        where: { id: item.variantId },
+        select: {
+          color: true, size: true, retailPrice: true,
+          wholesalePrice: true, wholesaleMinQty: true,
+          product: { select: { name: true } },
+        },
+      })
+      if (!v)
+        return NextResponse.json({ error: "Artigo da venda não encontrado (variante removida?)" }, { status: 400 })
+      const preco =
+        priceType === "GROSSO" && v.wholesalePrice && qty >= v.wholesaleMinQty
+          ? v.wholesalePrice
+          : v.retailPrice
+      precos.set(item.variantId, { preco, nome: v.product.name })
+    }
+    const subtotal = items.reduce(
+      (a, i) => a + (precos.get(i.variantId)?.preco ?? 0) * (Math.max(0, Math.floor(Number(i.qty) || 0))),
+      0
+    )
+    // Desconto: nunca negativo, nunca acima do subtotal (venda fantasma a 0 MT)
+    const desconto = Math.min(Math.max(0, Number(discount) || 0), subtotal)
+    // v2.5 (S3): desconto >10% exige gerente na sessão OU PIN de gerente válido
+    // (o mesmo PIN validado no ecrã - agora confirmado NO SERVIDOR, com
+    // bloqueio de tentativas). A sessão de caixa sozinha não autoriza.
+    const pctDesconto = subtotal > 0 ? (desconto / subtotal) * 100 : 0
+    if (pctDesconto > 10.001 && session.role !== "GERENTE") {
+      const valido = await pinGerenteValido(req, gerentePin)
+      if (!valido) {
+        const ip = ipDoPedido(req)
+        if (bloqueado("venda-desconto", ip))
+          return NextResponse.json(
+            { error: `${MSG_BLOQUEIO} (${Math.ceil(segundosRestantes("venda-desconto", ip) / 60)} min)` },
+            { status: 429 }
+          )
+        throw new AutorizacaoError("Desconto acima de 10% requer autorização do gerente (PIN).")
+      }
+    }
+    const total = Math.max(0, subtotal - desconto)
     const paidTotal = cleanPayments.reduce((a, p) => a + p.amount, 0)
     if (paidTotal + 0.01 < total)
       return NextResponse.json({ error: "Pagamentos insuficientes para o total" }, { status: 400 })
@@ -166,7 +230,7 @@ export async function POST(req: NextRequest) {
           userId,
           customerId: customerId || null,
           subtotal,
-          discount: Number(discount) || 0,
+          discount: desconto,
           total,
           isCredit: hasCredit,
           priceType: priceType === "GROSSO" ? "GROSSO" : "RETALHO",
@@ -179,13 +243,14 @@ export async function POST(req: NextRequest) {
                 const v = await tx.productVariant.findUniqueOrThrow({
                   where: { id: i.variantId }, include: { product: true },
                 })
+                const unitario = precos.get(i.variantId)?.preco ?? 0 // v2.5 (S3): preço da BD, não do cliente
                 return {
                   variantId: i.variantId,
                   name: v.product.name,
                   variantLabel: [v.color, v.size].filter(Boolean).join(" · ") || null,
                   qty: Math.floor(Number(i.qty) || 0),
-                  unitPrice: Number(i.unitPrice) || 0,
-                  total: (Number(i.unitPrice) || 0) * (Math.floor(Number(i.qty) || 0)),
+                  unitPrice: unitario,
+                  total: unitario * (Math.floor(Number(i.qty) || 0)),
                 }
               })
             ),
@@ -212,6 +277,8 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     if (e instanceof StockError)
       return NextResponse.json({ error: e.message }, { status: 400 })
+    if (e instanceof AutorizacaoError)
+      return NextResponse.json({ error: e.message }, { status: 403 })
     // Corrida entre dois replays do mesmo localId: o segundo bate no índice único
     // → devolve a venda já gravada em vez de erro 500.
     if (typeof e === "object" && e !== null && "code" in e && (e as { code?: string }).code === "P2002" && idLocal) {

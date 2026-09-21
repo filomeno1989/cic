@@ -12,7 +12,9 @@ datasource db {
 model User {
   id            String        @id @default(cuid())
   name          String
-  pin           String // PIN de acesso (4-6 digitos)
+  pin           String        @default("") // v2.5: vazio nas contas migradas (legado: backups antigos)
+  pinHash       String? // v2.5 (S5): hash scrypt do PIN - o PIN real nunca mais vive na base de dados
+  pinLookup     String?       @unique // v2.5 (S5): HMAC-SHA256(AUTH_SECRET, pin) - unicidade + busca sem revelar o PIN
   role          String        @default("CAIXA") // GERENTE | CAIXA
   active        Boolean       @default(true)
   isSystem      Boolean       @default(false) // conta do proprietário (Manutenção): invisível na RH e intocável por gerentes

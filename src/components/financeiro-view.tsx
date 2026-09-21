@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { mt, fmtDateTime, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/format";
 import { fetchT } from "@/lib/http";
 import type { SessionUser } from "@/lib/types";
-import { Receipt, LockKeyhole, Loader2, TrendingDown, CheckCircle2, XCircle, Settings2, Plus, X } from "lucide-react";
+import { Receipt, LockKeyhole, Loader2, TrendingDown, CheckCircle2, XCircle, Settings2, Plus, X, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Expense = { id: string; category: string; description: string | null; amount: number; date: string; user: { name: string } };
@@ -201,6 +201,23 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
   const todayExpenses = expenses.filter((e) => new Date(e.date).toDateString() === new Date().toDateString());
   const totalToday = todayExpenses.reduce((a, e) => a + e.amount, 0);
 
+  // v2.4: eliminar despesa registada por engano (só gerente)
+  const eliminarDespesa = async (e0: Expense) => {
+    if (!confirm(`Eliminar a despesa «${e0.category} - ${mt(e0.amount)}»?
+
+Fica apagada do histórico e do fecho do caixa.`)) return;
+    try {
+      const res = await fetchT(`/api/expenses/${e0.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Erro ao eliminar");
+      toast({ title: "Despesa eliminada", description: `${e0.category} · ${mt(e0.amount)}` });
+      load();
+      onDataChanged();
+    } catch (err) {
+      toast({ title: err instanceof Error ? err.message : "Erro ao eliminar", variant: "destructive" });
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Tabs defaultValue={user.role === "GERENTE" ? "despesas" : "fecho"}>
@@ -260,6 +277,7 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
                     <TableHead>Descrição</TableHead>
                     <TableHead>Registado por</TableHead>
                     <TableHead className="text-right">Valor</TableHead>
+                    {user.role === "GERENTE" && <TableHead className="w-10"><span className="sr-only">Eliminar</span></TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -270,10 +288,17 @@ export function FinanceiroView({ user, online, onDataChanged }: { user: SessionU
                       <TableCell className="text-xs text-muted-foreground">{e.description ?? "-"}</TableCell>
                       <TableCell className="text-xs">{e.user.name}</TableCell>
                       <TableCell className="text-right text-sm font-semibold text-destructive">-{mt(e.amount)}</TableCell>
+                      {user.role === "GERENTE" && (
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" title="Eliminar despesa (só gerente)" onClick={() => eliminarDespesa(e)}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                   {expenses.length === 0 && (
-                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground text-sm py-8">Sem despesas registadas.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={user.role === "GERENTE" ? 6 : 5} className="text-center text-muted-foreground text-sm py-8">Sem despesas registadas.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>

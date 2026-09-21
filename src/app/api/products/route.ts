@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 
 // GET /api/products - catálogo achatado por variante (p/ PDV e gestão)
-export async function GET() {
+// ?arquivados=1 → inclui produtos e variações ARQUIVADOS (gestão de catálogo)
+export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url)
+    const incluirArquivados = searchParams.get("arquivados") === "1"
+
     const products = await db.product.findMany({
-      where: { active: true },
+      where: incluirArquivados ? {} : { active: true },
       include: { variants: { orderBy: [{ color: "asc" }, { size: "asc" }] } },
       orderBy: { name: "asc" },
     })
     const flat = products.flatMap((p) =>
       p.variants
-        .filter((v) => v.active)
+        .filter((v) => (incluirArquivados ? true : v.active))
         .map((v) => ({
           id: v.id,
           productId: p.id,
@@ -20,6 +25,7 @@ export async function GET() {
           category: p.category,
           brand: p.brand,
           imagem: p.imagem, // P2: foto do produto (catálogo + portal)
+          productActive: p.active, // v2.4: gestão de arquivados na UI
           color: v.color,
           size: v.size,
           costPrice: v.costPrice,
@@ -38,9 +44,13 @@ export async function GET() {
   }
 }
 
-// POST /api/products - criar produto com grade de variações
+// POST /api/products - criar produto com grade de variações (só gerente)
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionUser(req)
+    if (!session) return unauthorized()
+    if (session.role !== "GERENTE") return forbidden("Apenas o gerente pode criar produtos")
+
     const body = await req.json()
     const { code, name, category, brand, variants } = body
     if (!code || !name) return NextResponse.json({ error: "Código e nome obrigatórios" }, { status: 400 })

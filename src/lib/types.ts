@@ -18,6 +18,7 @@ export type ProductVariantFlat = {
   category: string
   brand: string | null
   imagem: string | null // P2: foto do produto (portal + catálogo)
+  productActive?: boolean // v2.4: produto pai arquivado? (só vem com ?arquivados=1)
   color: string | null
   size: string | null
   costPrice: number

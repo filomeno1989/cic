@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const [
       settings, users, counters, products, productVariants, stockEntries,
       stockLosses, customers, creditPayments, sales, saleItems, payments,
-      vales, expenses, cashClosings,
+      vales, expenses, cashClosings, productImages,
     ] = await Promise.all([
       db.settings.findMany(),
       db.user.findMany(),
@@ -37,11 +37,13 @@ export async function GET(req: NextRequest) {
       db.vale.findMany(),
       db.expense.findMany(),
       db.cashClosing.findMany(),
+      db.productImage.findMany(), // v2.4: FOTOS no backup (C2 da auditoria - antes perdia-se tudo)
     ])
 
     const counts = {
       produtos: products.length,
       variantes: productVariants.length,
+      fotos: productImages.length,
       clientes: customers.length,
       vendas: sales.length,
       despesas: expenses.length,
@@ -49,11 +51,17 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      meta: { app: APP_TAG, version: 1, exportedAt: new Date().toISOString(), counts },
+      meta: { app: APP_TAG, version: 2, exportedAt: new Date().toISOString(), counts },
       settings, users, counters, products,
       productVariants, stockEntries, stockLosses,
       customers, creditPayments, sales, saleItems, payments,
       vales, expenses, cashClosings,
+      // Bytes → base64 para o JSON (restaurado com Buffer.from)
+      productImages: productImages.map((img) => ({
+        id: img.id, productId: img.productId, mime: img.mime,
+        dados: Buffer.from(img.dados).toString("base64"),
+        createdAt: img.createdAt,
+      })),
     })
   } catch {
     return NextResponse.json({ error: "Erro ao exportar backup" }, { status: 500 })
@@ -68,6 +76,7 @@ type BackupPayload = {
   customers?: unknown; creditPayments?: unknown
   sales?: unknown; saleItems?: unknown; payments?: unknown
   vales?: unknown; expenses?: unknown; cashClosings?: unknown
+  productImages?: unknown
 }
 
 const d = (v: unknown): Date | null => (v ? new Date(v as string) : null)
@@ -90,6 +99,7 @@ export async function POST(req: NextRequest) {
 
     await db.$transaction(async (tx) => {
       // 1) apagar na ordem inversa de dependências
+      await tx.productImage.deleteMany({}) // v2.4: fotos também são repostas
       await tx.creditPayment.deleteMany({})
       await tx.payment.deleteMany({})
       await tx.saleItem.deleteMany({})
@@ -142,7 +152,18 @@ export async function POST(req: NextRequest) {
           data: {
             id: s(p.id), code: s(p.code), name: s(p.name),
             category: s(p.category, "Geral"), brand: (p.brand as string | null) ?? null,
+            imagem: (p.imagem as string | null) ?? null, // v2.4: ligação da foto NÃO se perde mais no restauro (C2)
             active: p.active !== false, createdAt: d(p.createdAt) ?? new Date(), updatedAt: new Date(),
+          },
+        })
+
+      // v2.4: repor as FOTOS (base64 → Bytes) - antes o restauro apagava todas
+      for (const img of arr(b.productImages))
+        await tx.productImage.create({
+          data: {
+            id: s(img.id), productId: s(img.productId), mime: s(img.mime, "image/jpeg"),
+            dados: Buffer.from(s(img.dados), "base64"),
+            createdAt: d(img.createdAt) ?? new Date(), updatedAt: new Date(),
           },
         })
 
@@ -257,7 +278,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      message: `Backup restaurado: ${arr(b.sales).length} vendas, ${arr(b.customers).length} clientes, ${arr(b.products).length} produtos, ${arr(b.users).length} funcionários.`,
+      message: `Backup restaurado: ${arr(b.sales).length} vendas, ${arr(b.customers).length} clientes, ${arr(b.products).length} produtos, ${arr(b.productImages).length} fotos, ${arr(b.users).length} funcionários.`,
     })
   } catch {
     return NextResponse.json({ error: "Erro ao restaurar backup - verifique se o ficheiro é válido" }, { status: 500 })

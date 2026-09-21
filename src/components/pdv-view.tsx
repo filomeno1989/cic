@@ -226,6 +226,7 @@ export function PdvView({
       customerId: customer?.id ?? null,
       priceType,
       discount,
+      localId: `v-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, // v2.4: idempotência - o servidor nunca duplica esta venda
       items: cart.map((i) => ({ variantId: i.variantId, qty: i.qty, unitPrice: i.unitPrice, name: i.name, variantLabel: i.variantLabel })),
       payments: lines.map((l) => ({ method: l.method, amount: l.amount, change: l.change ?? 0, reference: l.reference })),
     };
@@ -255,9 +256,10 @@ export function PdvView({
         });
         return;
       }
-      // Rede caiu - guardar no aparelho e sincronizar depois
+      // Rede caiu - guardar no aparelho e sincronizar depois.
+      // v2.4: o payload já traz localId (v-...) → o servidor reconhece a mesma venda
+      // se o pedido online original tiver chegado a ser gravado sem resposta.
       const offlineSale: OfflineSale = {
-        localId: `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         ...payload,
         clientCreatedAt: new Date().toISOString(),
       };

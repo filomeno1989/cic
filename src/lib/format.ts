@@ -150,6 +150,7 @@ export function parseCategories(json: string | null | undefined, fallback: strin
 }
 
 export const LOSS_REASONS = [
+  { value: "AJUSTE", label: "Ajuste de contagem" }, // v2.4: correção de stock (usada pelo botão Ajustar)
   { value: "DERRETEU", label: "Derreteu/Avariou" },
   { value: "PARTIU", label: "Partiu-se" },
   { value: "EXPIROU", label: "Expirou" },

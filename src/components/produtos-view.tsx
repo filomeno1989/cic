@@ -13,6 +13,7 @@ import { mt, fmtDate, daysUntil, variantLabel, LOSS_REASONS, DEFAULT_PRODUCT_CAT
 import type { ProductVariantFlat, SessionUser } from "@/lib/types";
 import {
   Plus, Save, PackagePlus, AlertTriangle, CalendarClock, Trash2, Search, Loader2, X, Tags, Download, Check, Award, Image as ImageIcon,
+  Archive, ArchiveRestore, SlidersHorizontal, RotateCcw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { fetchT } from "@/lib/http";
@@ -21,6 +22,7 @@ import { ficheiroParaJpeg, type ImagemPayload } from "@/lib/imagem";
 type VariantDraft = {
   id?: string; color: string; size: string; costPrice: string; retailPrice: string;
   wholesalePrice: string; wholesaleMinQty: string; stock: string; minStock: string; expiryDate: string;
+  removed?: boolean; // v2.4: variante existente marcada p/ arquivar (active=false ao gravar)
 };
 
 const emptyVariant = (): VariantDraft => ({
@@ -66,18 +68,24 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   const [newBrandName, setNewBrandName] = useState("");
   const [addingNewBrand, setAddingNewBrand] = useState(false);
 
-  // Entrada / quebra
+  // Entrada / quebra / ajuste (v2.4)
   const [moveOpen, setMoveOpen] = useState(false);
-  const [moveType, setMoveType] = useState<"ENTRY" | "LOSS">("ENTRY");
+  const [moveType, setMoveType] = useState<"ENTRY" | "LOSS" | "AJUSTE">("ENTRY");
   const [moveVariant, setMoveVariant] = useState("");
   const [moveQty, setMoveQty] = useState("");
   const [moveCost, setMoveCost] = useState("");
   const [moveSupplier, setMoveSupplier] = useState("");
   const [moveReason, setMoveReason] = useState("DERRETEU");
   const [moveNotes, setMoveNotes] = useState("");
+  const [moveContagem, setMoveContagem] = useState(""); // v2.4: contagem real p/ ajuste
   const [moveSaving, setMoveSaving] = useState(false);
   const moveSavingRef = useRef(false); // trava duplo-clique (causa real do stock duplicado)
   const [history, setHistory] = useState<HistoryData>({ entries: [], losses: [] });
+
+  // v2.4: gestão de arquivados - ver produtos arquivados e arquivar/restaurar/eliminar
+  const [verArquivados, setVerArquivados] = useState(false);
+  const [catalogoArquivados, setCatalogoArquivados] = useState<ProductVariantFlat[]>([]);
+  const [busyProduct, setBusyProduct] = useState<string | null>(null); // trava duplo-clique nos botões de gestão
 
   const loadHistory = useCallback(async () => {
     try {
@@ -87,6 +95,61 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   }, []);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // v2.4: carrega o catálogo INCLUINDO arquivados quando o utilizador pede para vê-los
+  const loadArquivados = useCallback(async () => {
+    try {
+      const res = await fetchT("/api/products?arquivados=1");
+      if (res.ok) setCatalogoArquivados(await res.json());
+    } catch { /* mantém lista anterior */ }
+  }, []);
+
+  useEffect(() => {
+    if (verArquivados) void loadArquivados();
+  }, [verArquivados, loadArquivados]);
+
+  // Catálogo em uso: o normal (ativo) ou o completo com arquivados
+  const lista = verArquivados ? catalogoArquivados : catalog;
+
+  // v2.4: arquivar / restaurar / eliminar definitivamente (padrão dos Clientes)
+  const setProductArchived = async (productId: string, nome: string, active: boolean) => {
+    if (busyProduct) return;
+    setBusyProduct(productId);
+    try {
+      const res = await fetchT(`/api/products/${productId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Erro");
+      toast({ title: active ? "Produto restaurado" : "Produto arquivado", description: nome });
+      await loadArquivados();
+      onReload();
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro", variant: "destructive" });
+    } finally {
+      setBusyProduct(null);
+    }
+  };
+
+  const eliminarProduto = async (productId: string, nome: string) => {
+    if (busyProduct) return;
+    if (!confirm(`Eliminar DEFINITIVAMENTE «${nome}»?\n\nSó é possível se o produto NUNCA teve vendas nem movimentos de stock. Caso contrário, use «Arquivar».`)) return;
+    setBusyProduct(productId);
+    try {
+      const res = await fetchT(`/api/products/${productId}?modo=definitivo`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Erro ao eliminar");
+      toast({ title: "Produto eliminado para sempre", description: nome });
+      await loadArquivados();
+      onReload();
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro ao eliminar", variant: "destructive" });
+    } finally {
+      setBusyProduct(null);
+    }
+  };
 
   // Carrega categorias de produtos guardadas
   useEffect(() => {
@@ -189,12 +252,12 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    if (!q) return catalog;
-    return catalog.filter((v) =>
+    if (!q) return lista;
+    return lista.filter((v) =>
       v.productName.toLowerCase().includes(q) || v.productCode.toLowerCase().includes(q) ||
       variantLabel(v).toLowerCase().includes(q) || (v.brand ?? "").toLowerCase().includes(q)
     );
-  }, [catalog, search]);
+  }, [lista, search]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, ProductVariantFlat[]>();
@@ -219,10 +282,10 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
 
   const openEdit = async (productId: string) => {
     try {
-      const res = await fetchT("/api/products");
+      const res = await fetchT("/api/products?arquivados=1");
       if (!res.ok) throw new Error();
       const all: ProductVariantFlat[] = await res.json();
-      const vs = all.filter((v) => v.productId === productId);
+      const vs = all.filter((v) => v.productId === productId); // arquivados=1: traz também variantes desligadas
       if (vs.length === 0) return;
       setEditing({ id: productId, code: vs[0].productCode, name: vs[0].productName, category: vs[0].category, brand: vs[0].brand ?? "" });
       setDraft({ code: vs[0].productCode, name: vs[0].productName, category: vs[0].category, brand: vs[0].brand ?? "" });
@@ -238,6 +301,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         wholesaleMinQty: String(v.wholesaleMinQty),
         stock: String(v.stock), minStock: String(v.minStock),
         expiryDate: v.expiryDate ? v.expiryDate.slice(0, 10) : "",
+        removed: !v.active, // v2.4: variante arquivada vem desligada (pode reativar)
       })));
       setDialogOpen(true);
     } catch {
@@ -295,27 +359,39 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
       toast({ title: "Código e nome são obrigatórios", variant: "destructive" });
       return;
     }
-    const validVariants = variants.filter((v) => v.color.trim() || v.size.trim() || v.retailPrice);
-    if (validVariants.length === 0) {
+    const validVariants = variants.filter((v) => !v.removed && (v.color.trim() || v.size.trim() || v.retailPrice));
+    if (!editing && validVariants.length === 0) {
       toast({ title: "Adicione pelo menos uma variação (cor/tamanho/preço)", variant: "destructive" });
       return;
     }
+    if (editing && validVariants.length === 0 && !variants.some((v) => v.id)) {
+      toast({ title: "Adicione pelo menos uma variação (cor/tamanho/preço)", variant: "destructive" });
+      return;
+    }
+    // v2.4: variações existentes arquivadas vão no payload como active:false
+    // (nunca apagadas a sério - preservam o histórico de vendas)
+    const removidasExistentes = variants
+      .filter((v) => v.removed && v.id)
+      .map((v) => ({ id: v.id as string, active: false }));
     setSaving(true);
     savingRef.current = true;
     try {
       const payload = {
         ...draft,
-        variants: validVariants.map((v) => ({
-          ...(v.id ? { id: v.id } : {}),
-          color: v.color || null, size: v.size || null,
-          costPrice: parseFloat(v.costPrice) || 0,
-          retailPrice: parseFloat(v.retailPrice) || 0,
-          wholesalePrice: v.wholesalePrice ? parseFloat(v.wholesalePrice) : null,
-          wholesaleMinQty: parseInt(v.wholesaleMinQty) || 3,
-          ...(v.id ? {} : { stock: parseInt(v.stock) || 0 }),
-          minStock: parseInt(v.minStock) || 3,
-          expiryDate: v.expiryDate || null,
-        })),
+        variants: [
+          ...validVariants.map((v) => ({
+            ...(v.id ? { id: v.id } : {}),
+            color: v.color || null, size: v.size || null,
+            costPrice: parseFloat(v.costPrice) || 0,
+            retailPrice: parseFloat(v.retailPrice) || 0,
+            wholesalePrice: v.wholesalePrice ? parseFloat(v.wholesalePrice) : null,
+            wholesaleMinQty: parseInt(v.wholesaleMinQty) || 3,
+            ...(v.id ? {} : { stock: parseInt(v.stock) || 0 }),
+            minStock: parseInt(v.minStock) || 3,
+            expiryDate: v.expiryDate || null,
+          })),
+          ...removidasExistentes,
+        ],
       };
       const res = editing
         ? await fetchT(`/api/products/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -357,8 +433,16 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   const submitMove = async () => {
     if (moveSavingRef.current) return; // DUPLO-CLIQUE BLOQUEADO (era a causa do stock duplicado)
     const qty = parseInt(moveQty);
-    if (!moveVariant || !qty || qty <= 0) {
-      toast({ title: "Selecione o produto e a quantidade", variant: "destructive" });
+    if (!moveVariant) {
+      toast({ title: "Selecione o produto", variant: "destructive" });
+      return;
+    }
+    if (moveType !== "AJUSTE" && (!qty || qty <= 0)) {
+      toast({ title: "Selecione a quantidade", variant: "destructive" });
+      return;
+    }
+    if (moveType === "AJUSTE" && (moveContagem.trim() === "" || isNaN(parseInt(moveContagem)) || parseInt(moveContagem) < 0)) {
+      toast({ title: "Indique a contagem real (0 ou mais)", variant: "destructive" });
       return;
     }
     setMoveSaving(true);
@@ -370,16 +454,23 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         body: JSON.stringify(
           moveType === "ENTRY"
             ? { type: "ENTRY", variantId: moveVariant, qty, costPrice: parseFloat(moveCost) || 0, supplier: moveSupplier.trim(), userId: user.id }
-            : { type: "LOSS", variantId: moveVariant, qty, reason: moveReason, notes: moveNotes, userId: user.id }
+            : moveType === "LOSS"
+              ? { type: "LOSS", variantId: moveVariant, qty, reason: moveReason, notes: moveNotes, userId: user.id }
+              : { type: "AJUSTE", variantId: moveVariant, novoStock: parseInt(moveContagem), notes: moveNotes, userId: user.id }
         ),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? "Erro");
       }
-      toast({ title: moveType === "ENTRY" ? "Entrada registada - stock atualizado" : "Quebra registada - retirada do stock" });
+      toast({
+        title:
+          moveType === "ENTRY" ? "Entrada registada - stock atualizado"
+          : moveType === "LOSS" ? "Quebra registada - retirada do stock"
+          : "Stock ajustado à contagem real",
+      });
       setMoveOpen(false);
-      setMoveQty(""); setMoveCost(""); setMoveSupplier(""); setMoveNotes("");
+      setMoveQty(""); setMoveCost(""); setMoveSupplier(""); setMoveNotes(""); setMoveContagem("");
       onReload();
       loadHistory();
     } catch (e) {
@@ -390,11 +481,19 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
     }
   };
 
-  const openMove = (type: "ENTRY" | "LOSS", variantId?: string) => {
+  const openMove = (type: "ENTRY" | "LOSS" | "AJUSTE", variantId?: string) => {
     setMoveType(type);
     if (variantId) setMoveVariant(variantId);
+    setMoveContagem("");
     setMoveOpen(true);
   };
+
+  // v2.4: stock atual da variação escolhida no diálogo de movimentos + diferença do ajuste
+  const moveVariantAtual = lista.find((v) => v.id === moveVariant) ?? null;
+  const ajusteDelta =
+    moveType === "AJUSTE" && moveContagem.trim() !== "" && !isNaN(parseInt(moveContagem)) && moveVariantAtual
+      ? parseInt(moveContagem) - moveVariantAtual.stock
+      : null;
 
   const expiring = useMemo(
     () =>
@@ -428,7 +527,20 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         <Button variant="outline" onClick={() => openMove("LOSS")}>
           <AlertTriangle className="w-4 h-4 mr-1 text-amber-600" /> Registar Quebra
         </Button>
+        <Button
+          variant={verArquivados ? "secondary" : "outline"}
+          className={verArquivados ? "" : "text-muted-foreground"}
+          onClick={() => setVerArquivados((v) => !v)}
+        >
+          <Archive className="w-4 h-4 mr-1" /> {verArquivados ? "A ver arquivados" : "Ver arquivados"}
+        </Button>
       </div>
+
+      {verArquivados && (
+        <p className="text-xs text-muted-foreground bg-muted rounded-lg px-3 py-2">
+          A mostrar também produtos <b>arquivados</b> (e variações desligadas). Produtos arquivados não aparecem no PDV nem no portal do cliente - restaure para voltar a vender.
+        </p>
+      )}
 
       <Tabs defaultValue="todos">
         <TabsList>
@@ -441,9 +553,11 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         </TabsList>
 
         <TabsContent value="todos" className="space-y-3">
-          {grouped.map(([productId, vs]) => (
-            <div key={productId} className="card-lux overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 bg-muted/50 border-b">
+          {grouped.map(([productId, vs]) => {
+            const produtoArquivado = vs[0].productActive === false; // v2.4
+            return (
+            <div key={productId} className={`card-lux overflow-hidden ${produtoArquivado ? "opacity-70" : ""}`}>
+              <div className="flex items-center justify-between px-4 py-2.5 bg-muted/50 border-b gap-2">
                 <div className="flex items-center gap-3 min-w-0">
                   {vs[0].imagem ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -454,13 +568,32 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                     </div>
                   )}
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm truncate">{vs[0].productName}</p>
+                    <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+                      {vs[0].productName}
+                      {produtoArquivado && <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">ARQUIVADO</Badge>}
+                    </p>
                     <p className="text-[11px] text-muted-foreground">
                       <span className="text-gold font-mono">{vs[0].productCode}</span> · {vs[0].category}{vs[0].brand ? ` · ${vs[0].brand}` : ""}
                     </p>
                   </div>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => openEdit(productId)}>Editar grade</Button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {produtoArquivado ? (
+                    <>
+                      <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busyProduct === productId} onClick={() => setProductArchived(productId, vs[0].productName, true)}>
+                        <ArchiveRestore className="w-3.5 h-3.5 mr-1" /> Restaurar
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive" disabled={busyProduct === productId} onClick={() => eliminarProduto(productId, vs[0].productName)} title="Eliminar definitivamente (só sem histórico)">
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Eliminar
+                      </Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" disabled={busyProduct === productId} onClick={() => setProductArchived(productId, vs[0].productName, false)} title="Retira do PDV e do portal, mantendo o histórico">
+                      <Archive className="w-3.5 h-3.5 mr-1" /> Arquivar
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(productId)}>Editar grade</Button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <Table>
@@ -501,6 +634,9 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                             <div className="flex justify-end gap-1">
                               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openMove("ENTRY", v.id)}>+ Stock</Button>
                               <Button size="sm" variant="ghost" className="h-7 text-xs text-amber-700 dark:text-amber-400" onClick={() => openMove("LOSS", v.id)}>Quebra</Button>
+                              <Button size="sm" variant="ghost" className="h-7 text-xs text-gold" title="Corrigir para a contagem real (reduz ou aumenta)" onClick={() => openMove("AJUSTE", v.id)}>
+                                <SlidersHorizontal className="w-3 h-3 mr-1" /> Ajustar
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -510,7 +646,8 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                 </Table>
               </div>
             </div>
-          ))}
+            );
+          })}
           {grouped.length === 0 && <p className="text-center text-muted-foreground py-12 text-sm">Nenhum produto encontrado.</p>}
         </TabsContent>
 
@@ -755,11 +892,29 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
               </Button>
             </div>
             {variants.map((v, idx) => (
-              <div key={idx} className="relative rounded-lg border bg-muted/30 p-3 space-y-2">
+              <div key={idx} className={`relative rounded-lg border p-3 space-y-2 ${v.removed ? "border-dashed opacity-60" : "bg-muted/30"}`}>
+                {/* v2.4: X em NOVAS remove a linha; X em EXISTENTES arquiva ao gravar (preserva histórico) */}
                 {!editing && variants.length > 1 && (
-                  <button className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5" onClick={() => setVariants(variants.filter((_, i) => i !== idx))}>
+                  <button className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5" title="Remover linha" onClick={() => setVariants(variants.filter((_, i) => i !== idx))}>
                     <X className="w-3 h-3" />
                   </button>
+                )}
+                {editing && v.id && !v.removed && (
+                  <button
+                    className="absolute -top-2 -right-2 bg-amber-600 text-white rounded-full p-0.5"
+                    title="Arquivar esta variação (sai do PDV; histórico de vendas fica intacto)"
+                    onClick={() => setVariants(variants.map((x, i) => (i === idx ? { ...x, removed: true } : x)))}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                {v.removed && (
+                  <div className="flex items-center justify-between rounded-md bg-amber-500/10 border border-amber-500/40 px-2.5 py-1.5">
+                    <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">Esta variação será ARQUIVADA ao gravar (o histórico de vendas fica intacto).</p>
+                    <Button type="button" size="sm" variant="ghost" className="h-6 text-[11px] text-amber-700 dark:text-amber-400" onClick={() => setVariants(variants.map((x, i) => (i === idx ? { ...x, removed: false } : x)))}>
+                      <RotateCcw className="w-3 h-3 mr-1" /> Reativar
+                    </Button>
+                  </div>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
@@ -894,12 +1049,14 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
         </DialogContent>
       </Dialog>
 
-      {/* ----- Dialog entrada/quebra ----- */}
+      {/* ----- Dialog entrada/quebra/ajuste ----- */}
       <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {moveType === "ENTRY" ? <><PackagePlus className="w-4 h-4 text-green-600" /> Entrada de Mercadoria</> : <><AlertTriangle className="w-4 h-4 text-amber-600" /> Registar Quebra</>}
+              {moveType === "ENTRY" ? <><PackagePlus className="w-4 h-4 text-green-600" /> Entrada de Mercadoria</>
+                : moveType === "LOSS" ? <><AlertTriangle className="w-4 h-4 text-amber-600" /> Registar Quebra</>
+                : <><SlidersHorizontal className="w-4 h-4 text-gold" /> Ajustar Stock (Contagem)</>}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
@@ -916,10 +1073,12 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label className="text-xs">Quantidade *</Label>
-              <Input type="number" min="1" value={moveQty} onChange={(e) => setMoveQty(e.target.value)} />
-            </div>
+            {moveType !== "AJUSTE" && (
+              <div>
+                <Label className="text-xs">Quantidade *</Label>
+                <Input type="number" min="1" value={moveQty} onChange={(e) => setMoveQty(e.target.value)} />
+              </div>
+            )}
             {moveType === "ENTRY" ? (
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -934,14 +1093,14 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                   </datalist>
                 </div>
               </div>
-            ) : (
+            ) : moveType === "LOSS" ? (
               <div className="space-y-2">
                 <div>
                   <Label className="text-xs">Motivo *</Label>
                   <Select value={moveReason} onValueChange={setMoveReason}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {LOSS_REASONS.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                      {LOSS_REASONS.filter((r) => r.value !== "AJUSTE").map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -951,12 +1110,39 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                 </div>
                 <p className="text-[11px] text-muted-foreground">A quebra sai do stock e NÃO conta como venda.</p>
               </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="rounded-lg bg-muted px-3 py-2 text-xs">
+                  Stock atual no sistema: <b>{moveVariantAtual ? `${moveVariantAtual.stock} un.` : "-"}</b>
+                </div>
+                <div>
+                  <Label className="text-xs">Contagem real (stock correto) *</Label>
+                  <Input type="number" min="0" value={moveContagem} onChange={(e) => setMoveContagem(e.target.value)} placeholder="Ex: 24" autoFocus />
+                </div>
+                {ajusteDelta !== null && ajusteDelta !== 0 && (
+                  <p className={`text-xs font-medium ${ajusteDelta > 0 ? "text-green-600" : "text-amber-700 dark:text-amber-400"}`}>
+                    {ajusteDelta > 0
+                      ? `Vai ADICIONAR ${ajusteDelta} un. (mercadoria encontrada na contagem)`
+                      : `Vai REDUZIR ${Math.abs(ajusteDelta)} un. (sobra no sistema)`}
+                  </p>
+                )}
+                {ajusteDelta === 0 && (
+                  <p className="text-xs text-muted-foreground">A contagem é igual ao stock atual - nada a corrigir.</p>
+                )}
+                <div>
+                  <Label className="text-xs">Observações</Label>
+                  <Input value={moveNotes} onChange={(e) => setMoveNotes(e.target.value)} placeholder="Ex: contagem do armário de setembro" />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Corrige o stock para o valor REAL contado. A diferença fica registada no histórico (a menos entra como «Ajuste de contagem») e NÃO conta como venda.
+                </p>
+              </div>
             )}
             <Button className="btn-gold w-full" onClick={submitMove} disabled={moveSaving}>
               {moveSaving
                 ? <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                 : <CalendarClock className="w-4 h-4 mr-1" />}
-              {moveSaving ? "A registar…" : moveType === "ENTRY" ? "Registar Entrada" : "Registar Quebra"}
+              {moveSaving ? "A registar…" : moveType === "ENTRY" ? "Registar Entrada" : moveType === "LOSS" ? "Registar Quebra" : "Aplicar Ajuste"}
             </Button>
           </div>
         </DialogContent>

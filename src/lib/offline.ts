@@ -159,21 +159,36 @@ export async function syncQueue(): Promise<SyncResult> {
   let rejected = 0
   for (const sale of queue) {
     try {
-      const res = await fetch("/api/sales", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...sale, offline: true }),
-      })
+      // v2.4: timeout de 15s (antes o fetch podia ficar pendurado eternamente
+      // em rede meia-morta da Vodacom/Movitel e travar o ciclo de sync)
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 15000)
+      let res: Response
+      try {
+        res = await fetch("/api/sales", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...sale, offline: true }),
+          signal: ctrl.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
       if (res.ok) {
         removeFromQueue(sale.localId)
         synced++
-      } else if (res.status === 400 || res.status === 404) {
+      } else if (res.status === 400 || res.status === 404 || res.status === 409) {
         // Recusa definitiva do servidor - guardar como rejeitada e tirar da fila
         // (antes ficava a tentar para sempre, a mostrar "pendente" eterno)
         const data = await res.json().catch(() => ({}))
         pushRejected(sale, data.error ?? "Recusada pelo servidor")
         removeFromQueue(sale.localId)
         rejected++
+      } else if (res.status === 401) {
+        // Sessão expirou a meio da sincronização: NÃO insistir (antes tentava
+        // infinitamente). A venda fica na fila; o próximo login sincroniza.
+        failed++
+        break
       } else {
         failed++
       }

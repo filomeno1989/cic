@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 
-// GET /api/users - lista funcionários (com estatísticas p/ RH)
+// GET /api/users - lista funcionários (com estatísticas p/ RH) - SÓ GERENTE
+// v2.4: antes qualquer caixa autenticado via API via salários/comissões (falha da auditoria).
 // A conta do proprietário (isSystem) NUNCA aparece aqui - invisível na RH.
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const session = await getSessionUser(req)
+    if (!session) return unauthorized()
+    if (session.role !== "GERENTE") return forbidden("Apenas o gerente pode ver a lista de funcionários")
     const users = await db.user.findMany({
       where: { isSystem: false },
       orderBy: { name: "asc" },

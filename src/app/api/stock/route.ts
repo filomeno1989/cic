@@ -10,9 +10,8 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
     const { type, variantId, qty, costPrice, supplier, reason, notes } = body
-    const quantity = parseInt(qty)
-    if (!variantId || !quantity || quantity <= 0)
-      return NextResponse.json({ error: "Produto e quantidade válidos obrigatórios" }, { status: 400 })
+    if (!variantId)
+      return NextResponse.json({ error: "Produto obrigatório" }, { status: 400 })
 
     const variant = await db.productVariant.findUnique({
       where: { id: variantId },
@@ -20,7 +19,44 @@ export async function POST(req: NextRequest) {
     })
     if (!variant) return NextResponse.json({ error: "Variação não encontrada" }, { status: 404 })
 
+    // v2.4: AJUSTE de stock (contagem) - corrige para o valor REAL contado no armário.
+    // A diferença fica registada: a mais → Entrada (mercadoria encontrada);
+    // a menos → Quebra com motivo AJUSTE (nunca conta como venda).
+    if (type === "AJUSTE") {
+      const novoStock = parseInt(body.novoStock)
+      if (novoStock == null || isNaN(novoStock) || novoStock < 0)
+        return NextResponse.json({ error: "Indique a contagem real (0 ou mais)" }, { status: 400 })
+      const delta = novoStock - variant.stock
+      if (delta === 0)
+        return NextResponse.json({ error: "A contagem é igual ao stock atual - nada a corrigir" }, { status: 400 })
+
+      if (delta > 0) {
+        // Faltava mercadoria no sistema: registra como entrada (sem fornecedor)
+        await db.$transaction([
+          db.stockEntry.create({
+            data: { variantId, qty: delta, costPrice: variant.costPrice, supplier: null, userId: session.id },
+          }),
+          db.productVariant.update({ where: { id: variantId }, data: { stock: { increment: delta } } }),
+        ])
+        return NextResponse.json({ ok: true, direcao: "ENTRADA", delta, stock: novoStock })
+      }
+
+      // Sobrava no sistema: retira como quebra de ajuste (não pode ficar negativa)
+      if (-delta > variant.stock)
+        return NextResponse.json({ error: "Contagem inválida" }, { status: 400 })
+      await db.$transaction([
+        db.stockLoss.create({
+          data: { variantId, qty: -delta, reason: "AJUSTE", notes: notes || null, userId: session.id },
+        }),
+        db.productVariant.update({ where: { id: variantId }, data: { stock: { decrement: -delta } } }),
+      ])
+      return NextResponse.json({ ok: true, direcao: "SAIDA", delta, stock: novoStock })
+    }
+
     if (type === "LOSS") {
+      const quantity = parseInt(qty)
+      if (!quantity || quantity <= 0)
+        return NextResponse.json({ error: "Quantidade válida obrigatória" }, { status: 400 })
       if (quantity > variant.stock)
         return NextResponse.json({ error: "Quebra maior que stock atual" }, { status: 400 })
       const [loss] = await db.$transaction([
@@ -33,6 +69,9 @@ export async function POST(req: NextRequest) {
     }
 
     // ENTRADA de mercadoria (compra rápida - Mukherista/Baixa/Maputo)
+    const quantity = parseInt(qty)
+    if (!quantity || quantity <= 0)
+      return NextResponse.json({ error: "Quantidade válida obrigatória" }, { status: 400 })
     const [entry] = await db.$transaction([
       db.stockEntry.create({
         data: {

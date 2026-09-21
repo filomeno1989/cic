@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
 // POST /api/sales - cria venda (online ou sincronizada do offline).
 // O vendedor vem SEMPRE da sessão (cookie assinado) - não é falsificável.
 export async function POST(req: NextRequest) {
+  let idLocal: string | null = null // visível no catch p/ corridas de replay
   try {
     const session = await getSessionUser(req)
     if (!session) return unauthorized()
@@ -50,14 +51,35 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const {
       customerId, items, payments, discount, priceType,
-      offline, clientCreatedAt,
+      offline, clientCreatedAt, localId,
     }: {
       userId?: string; customerId?: string | null
       items: ItemIn[]; payments: PayIn[]
       discount?: number; priceType?: string
-      offline?: boolean; clientCreatedAt?: string
+      offline?: boolean; clientCreatedAt?: string; localId?: string
     } = body
     const userId = session.id
+
+    // v2.4 - IDEMPOTÊNCIA (crítico C1 da auditoria): o aparelho gera um localId
+    // para cada venda. Se a resposta se perdeu na rede (fundo típico Vodacom) a
+    // sincronização reenvia - ANTES isto duplicava venda + stock + comissão.
+    // Agora: mesmo localId devolve a MESMA venda, sem criar de novo.
+    const idLocalNovo = typeof localId === "string" && localId.length > 3 ? localId.slice(0, 80) : null
+    idLocal = idLocalNovo
+    if (idLocalNovo) {
+      const duplicada = await db.sale.findUnique({ where: { localId: idLocalNovo } })
+      if (duplicada) {
+        const completa = await db.sale.findUnique({
+          where: { id: duplicada.id },
+          include: {
+            items: true, payments: true,
+            customer: { select: { name: true, phone: true } },
+            user: { select: { name: true } },
+          },
+        })
+        return NextResponse.json(completa ?? duplicada, { status: 200 })
+      }
+    }
 
     if (!items?.length || !payments?.length)
       return NextResponse.json({ error: "Venda incompleta" }, { status: 400 })
@@ -140,6 +162,7 @@ export async function POST(req: NextRequest) {
       const created = await tx.sale.create({
         data: {
           number: counter.saleNumber,
+          localId: idLocalNovo,
           userId,
           customerId: customerId || null,
           subtotal,
@@ -189,6 +212,19 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     if (e instanceof StockError)
       return NextResponse.json({ error: e.message }, { status: 400 })
+    // Corrida entre dois replays do mesmo localId: o segundo bate no índice único
+    // → devolve a venda já gravada em vez de erro 500.
+    if (typeof e === "object" && e !== null && "code" in e && (e as { code?: string }).code === "P2002" && idLocal) {
+      const existente = await db.sale.findUnique({
+        where: { localId: idLocal },
+        include: {
+          items: true, payments: true,
+          customer: { select: { name: true, phone: true } },
+          user: { select: { name: true } },
+        },
+      }).catch(() => null)
+      if (existente) return NextResponse.json(existente, { status: 200 })
+    }
     return NextResponse.json({ error: "Erro ao processar venda" }, { status: 500 })
   }
 }

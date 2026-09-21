@@ -135,6 +135,7 @@ model CreditPayment {
 model Sale {
   id                String        @id @default(cuid())
   number            Int // sequencial
+  localId           String?       @unique // id gerado no aparelho (idempotência: replay da sincronização NÃO duplica venda)
   userId            String
   user              User          @relation(fields: [userId], references: [id])
   customerId        String?

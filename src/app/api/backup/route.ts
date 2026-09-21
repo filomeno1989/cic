@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     // responder - o limite de resposta de serverless na Vercel é ~4.5MB e
     // um export cortado a meio seria um backup inútil.
     const payload = {
-      meta: { app: APP_TAG, version: 2, exportedAt: new Date().toISOString(), counts },
+      meta: { app: APP_TAG, version: 2, exportedAt: new Date().toISOString(), counts, semFotos },
       settings, users, counters, products,
       productVariants, stockEntries, stockLosses,
       customers, creditPayments, sales, saleItems, payments,
@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
 }
 
 type BackupPayload = {
-  meta?: { app?: string; version?: number }
+  meta?: { app?: string; version?: number; semFotos?: boolean }
   settings?: unknown; users?: unknown; counters?: unknown
   products?: unknown; productVariants?: unknown
   stockEntries?: unknown; stockLosses?: unknown
@@ -142,13 +142,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Ficheiro de backup inválido ou de outra aplicação" }, { status: 400 })
     const b = backup
     const substituirContas = incluirContas === true // v2.6 (D6): por omissão PRESERVA
+    // v2.6 (D5): backup exportado com ?semFotos=1 NÃO TEM as fotos - restaurar
+    // NÃO pode apagar as fotos actuais (seria perda de dados). Só repõe fotos
+    // quando o backup as traz (export normal).
+    const backupTemFotos = b.meta?.semFotos !== true
 
     let contasPreservadas = 0
     let contasRecriadas = 0
 
     await db.$transaction(async (tx) => {
       // 1) apagar na ordem inversa de dependências
-      await tx.productImage.deleteMany({}) // v2.4: fotos também são repostas
+      if (backupTemFotos) {
+        await tx.productImage.deleteMany({}) // v2.4: fotos repostas do backup
+      } else {
+        // semFotos: PRESERVAR as fotos actuais - só remove as que apontam
+        // para produtos que o backup não contém (evita violar a FK ao
+        // restaurar produtos de outra base de dados)
+        const idsProdutos = new Set(arr(b.products).map((p) => s(p.id)))
+        const fotosActuais = await tx.productImage.findMany({ select: { productId: true } })
+        const orfas = fotosActuais.filter((f) => !idsProdutos.has(f.productId)).map((f) => f.productId)
+        if (orfas.length) await tx.productImage.deleteMany({ where: { productId: { in: orfas } } })
+      }
       await tx.creditPayment.deleteMany({})
       await tx.payment.deleteMany({})
       await tx.saleItem.deleteMany({})
@@ -242,12 +256,15 @@ export async function POST(req: NextRequest) {
         active: p.active !== false, createdAt: d(p.createdAt) ?? new Date(), updatedAt: new Date(),
       }), (lote) => tx.product.createMany({ data: lote }))
 
-      // v2.4: repor as FOTOS (base64 → Bytes) - antes o restauro apagava todas
-      await emLotes(arr(b.productImages), (img) => ({
-        id: s(img.id), productId: s(img.productId), mime: s(img.mime, "image/jpeg"),
-        dados: Buffer.from(s(img.dados), "base64"),
-        createdAt: d(img.createdAt) ?? new Date(), updatedAt: new Date(),
-      }), (lote) => tx.productImage.createMany({ data: lote }))
+      // v2.4: repor as FOTOS (base64 → Bytes) - antes o restauro apagava todas.
+      // Com backup semFotos as fotos actuais ficam intactas (não se toca nelas).
+      if (backupTemFotos) {
+        await emLotes(arr(b.productImages), (img) => ({
+          id: s(img.id), productId: s(img.productId), mime: s(img.mime, "image/jpeg"),
+          dados: Buffer.from(s(img.dados), "base64"),
+          createdAt: d(img.createdAt) ?? new Date(), updatedAt: new Date(),
+        }), (lote) => tx.productImage.createMany({ data: lote }))
+      }
 
       await emLotes(arr(b.productVariants), (v) => ({
         id: s(v.id), productId: s(v.productId),
@@ -328,8 +345,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       message: substituirContas
-        ? `Backup restaurado: ${arr(b.sales).length} vendas, ${arr(b.customers).length} clientes, ${arr(b.products).length} produtos, ${arr(b.productImages).length} fotos. Contas e definições substituídas pelas do backup.`
-        : `Backup restaurado: ${arr(b.sales).length} vendas, ${arr(b.customers).length} clientes, ${arr(b.products).length} produtos, ${arr(b.productImages).length} fotos. Contas preservadas (${contasRecriadas} recriadas para o histórico) e definições da loja mantidas.`,
+        ? `Backup restaurado: ${arr(b.sales).length} vendas, ${arr(b.customers).length} clientes, ${arr(b.products).length} produtos${backupTemFotos ? `, ${arr(b.productImages).length} fotos` : " (fotos actuais preservadas - backup sem fotos)"}. Contas e definições substituídas pelas do backup.`
+        : `Backup restaurado: ${arr(b.sales).length} vendas, ${arr(b.customers).length} clientes, ${arr(b.products).length} produtos${backupTemFotos ? `, ${arr(b.productImages).length} fotos` : " (fotos actuais preservadas - backup sem fotos)"}. Contas preservadas (${contasRecriadas} recriadas para o histórico) e definições da loja mantidas.`,
     })
   } catch {
     return NextResponse.json({ error: "Erro ao restaurar backup - verifique se o ficheiro é válido" }, { status: 500 })

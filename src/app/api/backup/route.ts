@@ -289,6 +289,7 @@ export async function POST(req: NextRequest) {
         subtotal: n(x.subtotal), discount: n(x.discount), total: n(x.total),
         status: s(x.status, "CONCLUIDA"), isCredit: !!x.isCredit,
         priceType: s(x.priceType, "RETALHO"), commission: n(x.commission),
+        localId: (x.localId as string | null) ?? null, // v2.6: idempotência sobrevive ao restauro (bug da v2.4: faltava)
         offline: !!x.offline, clientCreatedAt: d(x.clientCreatedAt),
         createdAt: d(x.createdAt) ?? new Date(), updatedAt: new Date(),
       }), (lote) => tx.sale.createMany({ data: lote }))

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { mt, fmtDateTime, methodLabel } from "@/lib/format";
 import { wallClockMZ, mzMidnight, mzEndOfDay, currentMonthMZ } from "@/lib/tz";
 import type { SaleFlat, SessionUser, ProductVariantFlat, CustomerFlat } from "@/lib/types";
-import { Receipt, Ban, Loader2, Search, FileDown, ShoppingCart, Wallet, Package, TrendingDown, TrendingUp, Users2, CalendarDays, Percent, Boxes } from "lucide-react";
+import { Receipt, Ban, Loader2, Search, FileDown, ShoppingCart, Wallet, Package, TrendingDown, TrendingUp, Users2, CalendarDays, Percent, Boxes, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ManagerPinDialog } from "@/components/manager-pin";
 import { ReceiptDialog, type StoreInfo } from "@/components/receipt";
@@ -28,6 +28,11 @@ type LucroData = {
   porProduto: Array<{ nome: string; variante: string; qty: number; receita: number; custo: number; lucro: number; margemPct: number }>;
   porMetodo: Array<{ metodo: string; total: number }>;
   stock: { valorCusto: number; valorRetalho: number; unidades: number };
+  previsto: {
+    lucroPotencial: number; vendaPotencial: number; custoTotal: number;
+    unidades: number; artigos: number; margemPct: number;
+    porProduto: Array<{ nome: string; categoria: string; variante: string; unidades: number; venda: number; custo: number; lucro: number }>;
+  };
 };
 
 type PeriodKey = "hoje" | "7d" | "mes" | "mespassado" | "tudo";
@@ -251,7 +256,7 @@ export function RelatoriosView({
       const { fromLabel, toLabel } = periodRange(lucroPeriod);
       await lucroReportPdf({
         store, generatedBy: user.name, fromLabel, toLabel,
-        lucro: { ...lucroData.resumo, porProduto: lucroData.porProduto, porMetodo: lucroData.porMetodo, stock: lucroData.stock },
+        lucro: { ...lucroData.resumo, porProduto: lucroData.porProduto, porMetodo: lucroData.porMetodo, stock: lucroData.stock, previsto: lucroData.previsto },
       });
     }, "Relatório de lucro descarregado.");
 
@@ -420,6 +425,62 @@ export function RelatoriosView({
                   <span><Percent className="w-3 h-3 inline mr-1 text-gold" />Comissões do período: <b className="text-foreground">{mt(lucroData.resumo.comissoes)}</b></span>
                   <span>Vendas a fiação do período: <b className="text-foreground">{mt(lucroData.resumo.creditado)}</b> (receita ainda por receber)</span>
                   <span>Anuladas: <b className="text-foreground">{lucroData.resumo.anuladasCount}</b> ({mt(lucroData.resumo.anuladasValor)}) - não contam para o lucro</span>
+                </div>
+
+                {/* v2.8: PREVISÃO - se vender todo o stock actual (pedido da Cleyde) */}
+                <div className="card-lux p-4 ring-1 ring-gold/40 space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <span className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center shrink-0">
+                        <Sparkles className="w-4.5 h-4.5 text-gold" />
+                      </span>
+                      <div>
+                        <h3 className="font-semibold text-sm">Previsão de lucro - se vender todo o stock actual</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
+                          Estimativa aos preços e custos de hoje - não prevê quebras, descontos, promoções nem vendas fiado. (Independente do período escolhido.)
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-emerald-600">{mt(lucroData.previsto.lucroPotencial)}</p>
+                      <p className="text-[11px] text-muted-foreground">margem prevista {lucroData.previsto.margemPct.toFixed(1)}%</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground px-1">
+                    <span>Unidades em loja: <b className="text-foreground">{lucroData.previsto.unidades}</b></span>
+                    <span>Artigos: <b className="text-foreground">{lucroData.previsto.artigos}</b></span>
+                    <span>Venda potencial: <b className="text-foreground">{mt(lucroData.previsto.vendaPotencial)}</b></span>
+                    <span>Custo da mercadoria: <b className="text-foreground">{mt(lucroData.previsto.custoTotal)}</b></span>
+                  </div>
+                  {lucroData.previsto.porProduto.length > 0 && (
+                    <div className="overflow-x-auto max-h-[300px] overflow-y-auto rounded-lg border border-border/60">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-card z-10">
+                          <TableRow>
+                            <TableHead>#</TableHead>
+                            <TableHead>Produto</TableHead>
+                            <TableHead>Unid.</TableHead>
+                            <TableHead className="text-right">Venda</TableHead>
+                            <TableHead className="text-right">Lucro previsto</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {lucroData.previsto.porProduto.map((p, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
+                              <TableCell className="text-sm">
+                                {p.nome}
+                                {p.variante && <span className="text-gold text-xs ml-1.5">{p.variante}</span>}
+                              </TableCell>
+                              <TableCell className="text-xs font-bold">{p.unidades}</TableCell>
+                              <TableCell className="text-right text-xs">{mt(p.venda)}</TableCell>
+                              <TableCell className={`text-right text-sm font-bold ${p.lucro < 0 ? "text-destructive" : "text-emerald-600"}`}>{mt(p.lucro)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </div>
 
                 {/* Ranking de produtos */}

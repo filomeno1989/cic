@@ -4,6 +4,7 @@ import { getSessionUser, unauthorized } from "@/lib/auth"
 import { bloqueado, segundosRestantes, registarFalha, registarSucesso, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit"
 import { pinConfere } from "@/lib/pin"
 import { round2 } from "@/lib/money"
+import { recalcularComissoesDoDia } from "@/lib/comissao"
 
 type ItemIn = { variantId: string; qty: number; unitPrice: number }
 type PayIn = { method: string; amount: number; change?: number; reference?: string }
@@ -305,6 +306,13 @@ export async function POST(req: NextRequest) {
           user: { select: { name: true } },
         },
       })
+
+      // v2.8 (regra DIA da Cleyde): comissão condicional recalculada no fim da
+      // transacção. Nos vendedores "TODAS" é um no-op; no modo "DIA" os
+      // primeiros N artigos do dia não pagam comissão e esta venda nova pode
+      // mudar a comissão das vendas anteriores de hoje (fica tudo coerente).
+      await recalcularComissoesDoDia(tx, userId, created.createdAt)
+
       return created
     })
 

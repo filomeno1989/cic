@@ -6,6 +6,9 @@ import { round2 } from "@/lib/money"
 // GET /api/lucro?from=ISO&to=ISO - relatório de LUCRO (v2.7, pedido da Cleide).
 // Devolve receita, custo das mercadorias, lucro bruto, despesas, lucro líquido,
 // margem, comissões, ranking de produtos por lucro e valor do stock actual.
+// v2.8: acrescenta a PREVISÃO de lucro - quanto a loja ganharia se vendesse
+// TODO o stock actual aos preços de retalho (pedido da Cleyde; é estimativa -
+// não prevê quebras, descontos, promoções nem fiado).
 // APENAS GERENTE - o caixa nunca vê lucro (nem via API manipulada).
 //
 // O custo vem do SNAPSHOT gravado em cada item no momento da venda
@@ -71,7 +74,10 @@ export async function GET(req: NextRequest) {
       db.productVariant.aggregate({ where: { active: true }, _sum: { stock: true } }),
       db.productVariant.findMany({
         where: { active: true, stock: { gt: 0 } },
-        select: { stock: true, costPrice: true, retailPrice: true },
+        select: {
+          stock: true, costPrice: true, retailPrice: true, color: true, size: true,
+          product: { select: { name: true, category: true, active: true } },
+        },
       }),
       db.sale.aggregate({
         where: {
@@ -139,6 +145,35 @@ export async function GET(req: NextRequest) {
     const stockValorCusto = round2(variantes.reduce((a, v) => a + v.stock * v.costPrice, 0))
     const stockValorRetalho = round2(variantes.reduce((a, v) => a + v.stock * v.retailPrice, 0))
 
+    // ---- v2.8: PREVISÃO de lucro (se vender TODO o stock actual) ----
+    // Só artigos vendáveis: variante activa de produto ACTIVO (arquivados
+    // não estão à venda, logo não entram na previsão). O custo é o actual
+    // da variante - é o melhor estimador para mercadoria ainda em loja.
+    const vendais = variantes.filter((v) => v.product.active)
+    const previstoLucro = round2(vendais.reduce((a, v) => a + (v.retailPrice - v.costPrice) * v.stock, 0))
+    const previstoVenda = round2(vendais.reduce((a, v) => a + v.retailPrice * v.stock, 0))
+    const previstoCusto = round2(vendais.reduce((a, v) => a + v.costPrice * v.stock, 0))
+    const previstoUnidades = vendais.reduce((a, v) => a + v.stock, 0)
+    const previstoMargemPct = previstoVenda > 0 ? round2((previstoLucro / previstoVenda) * 100) : 0
+
+    type PrevAgg = { nome: string; categoria: string; variante: string; unidades: number; venda: number; custo: number }
+    const previstoMap = new Map<string, PrevAgg>()
+    for (const v of vendais) {
+      const label = [v.color, v.size].filter(Boolean).join(" · ")
+      const key = `${v.product.name}||${label}`
+      const cur = previstoMap.get(key) ?? {
+        nome: v.product.name, categoria: v.product.category, variante: label,
+        unidades: 0, venda: 0, custo: 0,
+      }
+      cur.unidades += v.stock
+      cur.venda = round2(cur.venda + v.retailPrice * v.stock)
+      cur.custo = round2(cur.custo + v.costPrice * v.stock)
+      previstoMap.set(key, cur)
+    }
+    const previstoPorProduto = [...previstoMap.values()]
+      .map((p) => ({ ...p, lucro: round2(p.venda - p.custo) }))
+      .sort((a, b) => b.lucro - a.lucro)
+
     return NextResponse.json({
       resumo: {
         receita,
@@ -161,6 +196,15 @@ export async function GET(req: NextRequest) {
         valorCusto: stockValorCusto,
         valorRetalho: stockValorRetalho,
         unidades: Number(stockAgreg._sum.stock ?? 0),
+      },
+      previsto: {
+        lucroPotencial: previstoLucro,
+        vendaPotencial: previstoVenda,
+        custoTotal: previstoCusto,
+        unidades: previstoUnidades,
+        artigos: vendais.length,
+        margemPct: previstoMargemPct,
+        porProduto: previstoPorProduto,
       },
     })
   } catch {

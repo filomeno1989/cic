@@ -18,7 +18,8 @@ import { useToast } from "@/hooks/use-toast";
 
 type Employee = {
   id: string; name: string; role: string; active: boolean; phone: string | null;
-  baseSalary: number; commissionPct: number; createdAt: string;
+  baseSalary: number; commissionPct: number;
+  commissionMode: string; commissionMinQty: number; createdAt: string;
 };
 type Vale = { id: string; amount: number; reason: string | null; date: string; user: { name: string; role: string }; userId: string };
 type Payroll = {
@@ -36,7 +37,7 @@ export function RhView({ user }: { user: SessionUser }) {
 
   const [empOpen, setEmpOpen] = useState(false);
   const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
-  const [empForm, setEmpForm] = useState({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", phone: "" });
+  const [empForm, setEmpForm] = useState({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", commissionMode: "TODAS", commissionMinQty: "2", phone: "" });
   const [savingEmp, setSavingEmp] = useState(false);
   const savingEmpRef = useRef(false); // trava anti-duplo-clique (mesma cura do stock duplicado)
 
@@ -62,13 +63,13 @@ export function RhView({ user }: { user: SessionUser }) {
 
   const openNewEmp = () => {
     setEditingEmp(null);
-    setEmpForm({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", phone: "" });
+    setEmpForm({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", commissionMode: "TODAS", commissionMinQty: "2", phone: "" });
     setEmpOpen(true);
   };
 
   const openEditEmp = (e: Employee) => {
     setEditingEmp(e);
-    setEmpForm({ name: e.name, pin: "", role: e.role, baseSalary: String(e.baseSalary), commissionPct: String(e.commissionPct), phone: e.phone ?? "" });
+    setEmpForm({ name: e.name, pin: "", role: e.role, baseSalary: String(e.baseSalary), commissionPct: String(e.commissionPct), commissionMode: e.commissionMode === "DIA" ? "DIA" : "TODAS", commissionMinQty: String(e.commissionMinQty ?? 2), phone: e.phone ?? "" });
     setEmpOpen(true);
   };
 
@@ -90,6 +91,8 @@ export function RhView({ user }: { user: SessionUser }) {
         role: empForm.role,
         baseSalary: parseFloat(empForm.baseSalary) || 0,
         commissionPct: parseFloat(empForm.commissionPct) || 0,
+        commissionMode: empForm.commissionMode,
+        commissionMinQty: parseInt(empForm.commissionMinQty) || 0,
         phone: empForm.phone,
         ...(empForm.pin ? { pin: empForm.pin } : {}),
       };
@@ -334,6 +337,11 @@ export function RhView({ user }: { user: SessionUser }) {
                 </div>
                 <div className="text-xs text-muted-foreground space-y-0.5">
                   <p>Salário: {mt(e.baseSalary)} · Comissão: {e.commissionPct}%</p>
+                  <p>
+                    {e.commissionMode === "DIA"
+                      ? <>Regra do dia: <span className="text-amber-600 font-medium">comissão só do {e.commissionMinQty + 1}º artigo em diante</span> do mesmo dia</>
+                      : "Regra simples: % sobre todas as vendas"}
+                  </p>
                   <p>Vales do mês: <span className="text-amber-600 font-medium">{mt(valesByUser.get(e.id) ?? 0)}</span></p>
                   <p>Desde {fmtDate(e.createdAt)}{!e.active && " · arquivado (sem acesso)"}</p>
                 </div>
@@ -389,6 +397,25 @@ export function RhView({ user }: { user: SessionUser }) {
             <div className="grid grid-cols-2 gap-2">
               <div><Label className="text-xs">Salário base (MT)</Label><Input type="number" value={empForm.baseSalary} onChange={(e) => setEmpForm({ ...empForm, baseSalary: e.target.value })} /></div>
               <div><Label className="text-xs">Comissão (%)</Label><Input type="number" step="0.1" value={empForm.commissionPct} onChange={(e) => setEmpForm({ ...empForm, commissionPct: e.target.value })} /></div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Regra da comissão</Label>
+              <Select value={empForm.commissionMode} onValueChange={(v) => setEmpForm({ ...empForm, commissionMode: v })}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODAS">Toda venda - % sobre o total (regra simples)</SelectItem>
+                  <SelectItem value="DIA">Por dia - comissão condicional (regra da gerência)</SelectItem>
+                </SelectContent>
+              </Select>
+              {empForm.commissionMode === "DIA" && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Artigos de entrada SEM comissão por dia</Label>
+                  <Input type="number" min={0} value={empForm.commissionMinQty} onChange={(e) => setEmpForm({ ...empForm, commissionMinQty: e.target.value })} />
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Ex.: 2 → o 1º e o 2º artigo do dia não pagam comissão; do {parseInt(empForm.commissionMinQty) + 1 || 3}º em diante paga {empForm.commissionPct || "a %"} por artigo. Os dias NÃO se somam (vender em dias diferentes não junta a contagem) e anular uma venda recalcula o dia.
+                  </p>
+                </div>
+              )}
             </div>
             <div><Label className="text-xs">Telefone</Label><Input value={empForm.phone} onChange={(e) => setEmpForm({ ...empForm, phone: e.target.value })} placeholder="+258 84 000 0000" /></div>
             <Button className="btn-gold w-full" onClick={saveEmp} disabled={savingEmp}>

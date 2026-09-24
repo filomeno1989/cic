@@ -431,6 +431,11 @@ export type PdfLucro = {
   porProduto: Array<{ nome: string; variante: string; qty: number; receita: number; custo: number; lucro: number; margemPct: number }>;
   porMetodo: Array<{ metodo: string; total: number }>;
   stock: { valorCusto: number; valorRetalho: number; unidades: number };
+  previsto?: {
+    lucroPotencial: number; vendaPotencial: number; custoTotal: number;
+    unidades: number; artigos: number; margemPct: number;
+    porProduto: Array<{ nome: string; categoria: string; variante: string; unidades: number; venda: number; custo: number; lucro: number }>;
+  };
 };
 
 export async function lucroReportPdf(opts: {
@@ -547,6 +552,59 @@ export async function lucroReportPdf(opts: {
     columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
     margin: { left: 14, right: 14 },
   });
+  y = lastY(doc, y) + 6;
+
+  // v2.8: PREVISÃO de lucro (pedido da Cleyde) - se vender todo o stock actual
+  if (lucro.previsto) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(...DARK);
+    doc.text("PREVISÃO DE LUCRO - SE VENDER TODO O STOCK ACTUAL", 14, y);
+    y += 4;
+    y = summaryBoxes(ctx, y, [
+      { label: "Unidades", value: String(lucro.previsto.unidades) },
+      { label: "Venda potencial", value: money(lucro.previsto.vendaPotencial) },
+      { label: "Custo da mercadoria", value: money(lucro.previsto.custoTotal) },
+      { label: "LUCRO PREVISTO", value: money(lucro.previsto.lucroPotencial), color: GREEN },
+    ]);
+    if (lucro.previsto.porProduto.length) {
+      autoTable(doc, {
+        startY: y,
+        head: [["Produto", "Variante", "Unid.", "Venda", "Lucro previsto"]],
+        body: lucro.previsto.porProduto.slice(0, 200).map((p) => [
+          p.nome,
+          p.variante || "-",
+          String(p.unidades),
+          money(p.venda),
+          money(p.lucro),
+        ]),
+        theme: "grid",
+        styles: { fontSize: 7, cellPadding: 1.5, lineColor: LINE, textColor: DARK },
+        headStyles: { fillColor: GOLD, textColor: DARK, fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [252, 250, 245] },
+        columnStyles: {
+          0: { cellWidth: 62 }, 1: { cellWidth: 28 }, 2: { halign: "right", cellWidth: 12 },
+          3: { halign: "right" }, 4: { halign: "right", fontStyle: "bold", textColor: GREEN },
+        },
+        didParseCell: (data) => {
+          if (data.section === "body") {
+            const row = data.row.raw as string[] | undefined;
+            if (row && parseFloat((row[4] ?? "").replace(/[^\d.-]/g, "")) < 0)
+              data.cell.styles.textColor = RED;
+          }
+        },
+        margin: { left: 14, right: 14 },
+      });
+      y = lastY(doc, y) + 3;
+    }
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...GRAY);
+    doc.text(
+      "Estimativa aos preços e custos actuais - não prevê quebras, descontos, promoções nem vendas fiado.",
+      14, y
+    );
+  }
 
   finishDoc(ctx, `lucro-cic-${new Date().toISOString().slice(0, 10)}.pdf`);
 }

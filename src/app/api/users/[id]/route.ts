@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 import { hashPin, pinLookupHmac } from "@/lib/pin"
+import { recalcularComissoesDoDia } from "@/lib/comissao"
 
 // PUT /api/users/[id] - atualizar funcionário (só gerente - validado na SESSÃO)
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -12,7 +13,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (session.role !== "GERENTE") return forbidden("Apenas o gerente pode editar funcionários")
 
     const body = await req.json()
-    const { name, pin, role, baseSalary, commissionPct, phone, active } = body
+    const { name, pin, role, baseSalary, commissionPct, commissionMode, commissionMinQty, phone, active } = body
     if (pin && String(pin).length < 4)
       return NextResponse.json({ error: "PIN deve ter 4+ dígitos" }, { status: 400 })
     if (pin && !/^\d+$/.test(String(pin)))
@@ -49,10 +50,32 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         ...(role && { role: role === "GERENTE" ? "GERENTE" : "CAIXA" }),
         ...(baseSalary !== undefined && { baseSalary: Number(baseSalary) || 0 }),
         ...(commissionPct !== undefined && { commissionPct: Number(commissionPct) || 0 }),
+        // v2.8 (regra DIA da Cleyde): modo da comissão + "porta de entrada"
+        ...(commissionMode !== undefined && { commissionMode: commissionMode === "DIA" ? "DIA" : "TODAS" }),
+        ...(commissionMinQty !== undefined && {
+          commissionMinQty: Math.max(0, Math.min(999, Math.floor(Number(commissionMinQty) || 0))),
+        }),
         ...(phone !== undefined && { phone: phone || null }),
         ...(active !== undefined && { active: !!active }),
       },
     })
+
+    // v2.8: se a regra de comissão mudou, o dia de hoje do vendedor recalcula
+    // na hora (modo DIA) - as vendas já feitas hoje ficam coerentes com a
+    // regra nova sem esperar pela venda seguinte. Nos modos TODAS é no-op.
+    const novoMin = Math.max(0, Math.min(999, Math.floor(Number(commissionMinQty ?? target.commissionMinQty) || 0)))
+    const novoMode = commissionMode === "DIA" ? "DIA" : commissionMode === "TODAS" ? "TODAS" : target.commissionMode
+    const novoPct = commissionPct !== undefined ? Number(commissionPct) || 0 : target.commissionPct
+    if (
+      novoMode !== target.commissionMode ||
+      novoMin !== target.commissionMinQty ||
+      novoPct !== target.commissionPct
+    ) {
+      try {
+        await db.$transaction((tx) => recalcularComissoesDoDia(tx, id, new Date()))
+      } catch { /* best-effort - a folha recalcula à próxima venda */ }
+    }
+
     const { pinHash: _h, pin: _p, ...userSeguro } = user
     return NextResponse.json(userSeguro)
   } catch {

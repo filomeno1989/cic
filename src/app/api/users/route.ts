@@ -4,10 +4,12 @@ import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 import { hashPin, pinLookupHmac } from "@/lib/pin"
 
 // Campos seguros para a resposta - NUNCA devolver pin/pinHash/pinLookup
-function seguro(u: { id: string; name: string; role: string; active: boolean; phone: string | null; baseSalary: number; commissionPct: number; createdAt: Date }) {
+function seguro(u: { id: string; name: string; role: string; active: boolean; phone: string | null; baseSalary: number; commissionPct: number; commissionMode: string; commissionMinQty: number; createdAt: Date }) {
   return {
     id: u.id, name: u.name, role: u.role, active: u.active, phone: u.phone,
-    baseSalary: u.baseSalary, commissionPct: u.commissionPct, createdAt: u.createdAt,
+    baseSalary: u.baseSalary, commissionPct: u.commissionPct,
+    commissionMode: u.commissionMode, commissionMinQty: u.commissionMinQty,
+    createdAt: u.createdAt,
   }
 }
 
@@ -24,7 +26,8 @@ export async function GET(req: NextRequest) {
       orderBy: { name: "asc" },
       select: {
         id: true, name: true, role: true, active: true, phone: true,
-        baseSalary: true, commissionPct: true, createdAt: true,
+        baseSalary: true, commissionPct: true,
+        commissionMode: true, commissionMinQty: true, createdAt: true,
       },
     })
     return NextResponse.json(users)
@@ -41,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (session.role !== "GERENTE") return forbidden("Apenas o gerente pode criar funcionários")
 
     const body = await req.json()
-    const { name, pin, role, baseSalary, commissionPct, phone } = body
+    const { name, pin, role, baseSalary, commissionPct, commissionMode, commissionMinQty, phone } = body
     if (!name || !pin) return NextResponse.json({ error: "Nome e PIN obrigatórios" }, { status: 400 })
     if (String(pin).length < 4) return NextResponse.json({ error: "PIN deve ter 4+ dígitos" }, { status: 400 })
     if (!/^\d+$/.test(String(pin))) return NextResponse.json({ error: "PIN deve conter apenas números" }, { status: 400 })
@@ -55,6 +58,9 @@ export async function POST(req: NextRequest) {
         role: role === "GERENTE" ? "GERENTE" : "CAIXA",
         baseSalary: Number(baseSalary) || 0,
         commissionPct: Number(commissionPct) || 0,
+        // v2.8 (regra DIA da Cleyde): modo da comissão + "porta de entrada"
+        commissionMode: commissionMode === "DIA" ? "DIA" : "TODAS",
+        commissionMinQty: Math.max(0, Math.min(999, Math.floor(Number(commissionMinQty) || 0))),
         phone: phone || null,
         isSystem: false, // contas criadas na RH nunca são de sistema
       },

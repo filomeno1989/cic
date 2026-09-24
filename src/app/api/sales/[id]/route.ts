@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 import { bloqueado, registarFalha, registarSucesso, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit"
 import { pinConfere } from "@/lib/pin"
+import { recalcularComissoesDoDia } from "@/lib/comissao"
 
 // DELETE /api/sales/[id] - anulação (estorno) exige SESSÃO de gerente + PIN de gerente
 // v2.4: antes bastava o PIN (sem limite de tentativas e sem verificar o papel na sessão).
@@ -57,6 +58,11 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
           data: { stock: { increment: i.qty } },
         })
       }
+      // v2.8 (regra DIA da Cleyde): anular uma venda tira os artigos dela da
+      // contagem do dia - as comissões do vendedor nesse dia recalculam-se
+      // (ex.: anulou a 2ª venda e o 3º artigo volta a ser "de entrada").
+      // Nos vendedores "TODAS" é um no-op.
+      await recalcularComissoesDoDia(tx, sale.userId, sale.createdAt)
       return true
     })
     if (!anulada) return NextResponse.json({ error: "Venda já anulada" }, { status: 400 })

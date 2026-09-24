@@ -21,6 +21,8 @@ model User {
   phone         String?
   baseSalary    Float         @default(0)
   commissionPct Float         @default(0) // % comissao sobre vendas
+  commissionMode String       @default("TODAS") // v2.8: TODAS = % sobre toda a venda | DIA = só a partir do (N+1)º artigo do mesmo dia
+  commissionMinQty Int         @default(0) // v2.8 (regra DIA): artigos "de entrada" sem comissão por dia (ex.: 2 → comissão começa no 3º)
   sales         Sale[]
   vales         Vale[]
   closings      CashClosing[]

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Delete, Loader2, Lock, KeyRound, Sparkles, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
@@ -112,11 +113,14 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
     setError(false);
   };
 
-  const pick = (u: LoginUser) => {
+  // v3.1: o dono pediu um DROPDOWN em vez dos cartões - escolhe o utilizador
+  // em cima e o espaço do PIN fica logo em baixo. Trocar de utilizador limpa
+  // o PIN a meio (ninguém herda o código que outro começou a digitar).
+  const pick = (id: string) => {
     if (submitTimer.current) window.clearTimeout(submitTimer.current);
     setPin("");
     setError(false);
-    setSelected((cur) => (cur?.id === u.id ? null : u));
+    setSelected(users.find((u) => u.id === id) ?? null);
   };
 
   const enterCodeMode = () => {
@@ -154,7 +158,9 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
     }
   };
 
-  const showCards = !codeMode && usersLoaded && users.length > 0;
+  // v3.1: dropdown no lugar dos cartões (mesma regra: só se houver contas e
+  // não estiver no modo "Acesso por código")
+  const showSelect = !codeMode && usersLoaded && users.length > 0;
 
   // v3.0 (U4): aviso quando a sessão expirou a meio do dia - o interceptor
   // manda para /gestao?expirada=1; aqui explicamos ao pessoal o que aconteceu.
@@ -172,7 +178,7 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
     ? "Digite o seu código de acesso"
     : selected
       ? `PIN de ${selected.name}`
-      : "Toque no seu nome · PIN de 4 a 6 dígitos";
+      : "Escolha o utilizador · PIN de 4 a 6 dígitos";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] relative overflow-hidden p-4">
@@ -230,45 +236,43 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
             </Button>
           </div>
         ) : (
-          /* ---------- Login com cartões + PIN ---------- */
+          /* ---------- Login com dropdown + PIN (v3.1) ---------- */
           <div className="bg-[#141414] border border-[#d4af37]/25 rounded-2xl p-6 shadow-2xl">
-            {showCards && (
-              <div className="flex flex-wrap justify-center gap-4 mb-5">
-                {users.map((u) => {
-                  const isSel = selected?.id === u.id;
-                  return (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => pick(u)}
-                      className={`group flex flex-col items-center gap-1.5 rounded-xl px-3 py-2.5 transition-all ${
-                        isSel ? "bg-[#2a2310] ring-2 ring-[#d4af37]" : "hover:bg-[#1c1c1c]"
-                      }`}
-                    >
-                      <span
-                        className={`w-14 h-14 rounded-full flex items-center justify-center font-serif text-lg transition-all ${
-                          isSel
-                            ? "bg-[#d4af37] text-black border-2 border-[#d4af37]"
-                            : "bg-[#1c1c1c] text-[#e9d9a8] border-2 border-[#3f3f46] group-hover:border-[#d4af37]/60"
-                        }`}
+            {showSelect && (
+              <div className="mb-4">
+                <label className="block text-[10px] uppercase tracking-widest text-[#a1a1aa] mb-1.5 px-1">
+                  Utilizador
+                </label>
+                <Select value={selected?.id ?? ""} onValueChange={pick} disabled={loading}>
+                  <SelectTrigger className="w-full h-12 rounded-xl bg-[#1c1c1c] border-[#3f3f46] text-zinc-100 text-sm hover:border-[#d4af37]/60 hover:bg-[#1c1c1c] data-[placeholder]:text-[#a1a1aa] focus-visible:border-[#d4af37] focus-visible:ring-[#d4af37]/30 aria-invalid:border-red-500">
+                    <SelectValue placeholder="Selecionar utilizador…" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#141414] border-[#3f3f46] text-zinc-100 rounded-xl max-h-72">
+                    {users.map((u) => (
+                      <SelectItem
+                        key={u.id}
+                        value={u.id}
+                        className="rounded-lg focus:bg-[#2a2310] focus:text-[#e9d9a8] [&_svg:not([class*='text-'])]:text-[#d4af37]"
                       >
-                        {initials(u.name)}
-                      </span>
-                      <span className={`text-xs font-medium leading-tight ${isSel ? "text-[#e9d9a8]" : "text-zinc-300"}`}>
-                        {u.name}
-                      </span>
-                      <span
-                        className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
-                          u.role === "GERENTE"
-                            ? "text-[#d4af37] border-[#d4af37]/50"
-                            : "text-zinc-500 border-zinc-700"
-                        }`}
-                      >
-                        {u.role === "GERENTE" ? "Gerente" : "Caixa"}
-                      </span>
-                    </button>
-                  );
-                })}
+                        <span className="flex items-center gap-2">
+                          <span className="w-7 h-7 shrink-0 rounded-full bg-[#2a2310] border border-[#d4af37]/40 text-[#e9d9a8] text-[10px] font-serif flex items-center justify-center">
+                            {initials(u.name)}
+                          </span>
+                          <span className="text-sm">{u.name}</span>
+                          <span
+                            className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
+                              u.role === "GERENTE"
+                                ? "text-[#d4af37] border-[#d4af37]/50"
+                                : "text-zinc-500 border-zinc-700"
+                            }`}
+                          >
+                            {u.role === "GERENTE" ? "Gerente" : "Caixa"}
+                          </span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 

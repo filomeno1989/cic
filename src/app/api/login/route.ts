@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { signToken, cookieOptions, SESSION_COOKIE } from "@/lib/session";
 import { bloqueado, segundosRestantes, registarFalha, registarSucesso, ipDoPedido, tentativasRestantes, MSG_BLOQUEIO } from "@/lib/ratelimit";
 import { pinConfere, pinLookupHmac } from "@/lib/pin";
+import { estadoManutencao, mostraHora } from "@/lib/manutencao";
 
 /*
  * POST /api/login - autenticação por PIN (define cookie de sessão assinado)
@@ -30,19 +31,20 @@ export async function POST(req: NextRequest) {
     const pinStr = String(pin)
 
     // Candidata a conta: pelo cartão escolhido, ou pela impressão digital do PIN
+    const SEL = { id: true, name: true, role: true, commissionPct: true, baseSalary: true, phone: true, pinHash: true, pin: true, isSystem: true };
     const candidato = userId
       ? await db.user.findFirst({
           where: { id: String(userId), active: true },
-          select: { id: true, name: true, role: true, commissionPct: true, baseSalary: true, phone: true, pinHash: true, pin: true },
+          select: SEL,
         })
       : (await db.user.findFirst({
           where: { pinLookup: pinLookupHmac(pinStr), active: true },
-          select: { id: true, name: true, role: true, commissionPct: true, baseSalary: true, phone: true, pinHash: true, pin: true },
+          select: SEL,
         }) ??
           // Recurso para contas restauradas de backups antigos (sem hash)
           await db.user.findFirst({
             where: { pin: pinStr, active: true },
-            select: { id: true, name: true, role: true, commissionPct: true, baseSalary: true, phone: true, pinHash: true, pin: true },
+            select: SEL,
           }))
 
     // O PIN tem de conferir (hash scrypt, ou legado em contas antigas)
@@ -58,9 +60,28 @@ export async function POST(req: NextRequest) {
     }
 
     registarSucesso("login", ip);
+
+    // v3.2 (F4): MODO MANUTENÇÃO - se o sistema está fechado, só o
+    // proprietário (isSystem) consegue entrar; o pessoal recebe a
+    // mensagem de manutenção (503) em vez de sessão. Não conta como
+    // tentativa falhada - o PIN deles está certo, é o sistema que está fechado.
+    const manut = await estadoManutencao();
+    if (manut.ativo && !candidato.isSystem) {
+      return NextResponse.json(
+        { error: manut.mensagem, manutencao: true },
+        { status: 503 }
+      );
+    }
+
     const token = await signToken(candidato.id)
-    const { pinHash: _h, pin: _p, ...user } = candidato
-    const res = NextResponse.json(user)
+    const { pinHash: _h, pin: _p, isSystem: _i, ...user } = candidato
+    // v3.2: se há manutenção AGENDADA ainda por começar, o aviso vai junto
+    // para o ecrã mostrar "das X às Y o sistema não estará operacional".
+    const res = NextResponse.json(
+      manut.agendado
+        ? { ...user, avisoManutencao: `Manutenção programada: de ${mostraHora(manut.inicio)} a ${mostraHora(manut.fim)} o sistema não estará operacional.` }
+        : user
+    )
     res.cookies.set(SESSION_COOKIE, token, cookieOptions(process.env.NODE_ENV === "production"))
     return res
   } catch {

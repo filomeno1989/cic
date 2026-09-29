@@ -14,6 +14,7 @@ const ROTAS_PUBLICAS = [
   "/api/login-users",
   "/api/verify-pin",
   "/api/manutencao",
+  "/api/manutencao-status",
   "/api/setup",
   "/api/health",
   "/api/me",

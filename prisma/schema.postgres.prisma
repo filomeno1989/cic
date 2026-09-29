@@ -284,3 +284,21 @@ model BackupAuto {
   comFotos Boolean  @default(true)
   criadoEm DateTime @default(now())
 }
+
+// v3.2 (F4): MODO DE MANUTENÇÃO (idêntico ao schema local)
+// v3.2 (F4): MODO DE MANUTENÇÃO - o proprietário fecha o sistema ao pessoal
+// para trabalhos/actualizações. Uma só linha (id "main").
+//   modo ""        = operacional
+//   modo "AGORA"   = fechado já (pessoal vê "em manutenção, aguarde")
+//   modo "AGENDADA"= fechado só entre inicio e fim (aviso antes, bloqueio dentro)
+// Horários em texto local de Maputo "YYYY-MM-DDTHH:mm" (UTC+2, sem DST) -
+// comparação de strings ISO local é segura e sobrevive a fuso do servidor.
+model Manutencao {
+  id            String   @id @default("main")
+  modo          String   @default("")
+  mensagem      String   @default("") // mensagem personalizada (vazio = texto padrão)
+  inicio        String   @default("") // AGENDADA: começo | AGORA: quando activou
+  fim           String   @default("") // AGENDADA: fim | AGORA: previsão de retorno (opcional)
+  atualizadoEm  DateTime @updatedAt
+  atualizadoPor String   @default("")
+}

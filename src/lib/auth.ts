@@ -7,6 +7,7 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { verifyToken, SESSION_COOKIE } from "@/lib/session";
+import { estadoManutencao } from "@/lib/manutencao";
 
 export type SessionInfo = {
   id: string;
@@ -25,10 +26,21 @@ export async function getSessionUser(req: NextRequest): Promise<SessionInfo | nu
       where: { id: userId },
       select: {
         id: true, name: true, role: true, commissionPct: true,
-        baseSalary: true, phone: true, active: true,
+        baseSalary: true, phone: true, active: true, isSystem: true,
       },
     });
     if (!user || !user.active) return null;
+
+    // v3.2 (F4): MANUTENÇÃO ACTIVA - o pessoal fica bloqueado também a meio
+    // do uso: as chamadas API passam a devolver 401 ("sessão terminou"), o
+    // sistema manda para o ecrã de entrada e lá aparece o aviso de manutenção.
+    // O proprietário (isSystem) continua a trabalhar para poder desligar o
+    // modo; a manutenção AGENDADA reabre sozinha no fim (cache de 20s aqui).
+    if (!user.isSystem) {
+      const manut = await estadoManutencao();
+      if (manut.ativo) return null;
+    }
+
     return {
       id: user.id,
       name: user.name,

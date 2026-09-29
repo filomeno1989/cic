@@ -4,8 +4,8 @@
 // ecrã de login e portal /loja) junto à assinatura de produção.
 // ============================================================
 
-export const APP_VERSION = "3.1";
-export const APP_VERSION_DATE = "Setembro 2026"; // v3.1 - login com dropdown de utilizadores
+export const APP_VERSION = "3.2";
+export const APP_VERSION_DATE = "Setembro 2026"; // v3.2 - login com avatar + modo de manutenção (F4)
 
 export const APP_VERSION_LABEL = `Versão atualizada para ${APP_VERSION} · ${APP_VERSION_DATE}`;
 

@@ -11,6 +11,7 @@ import { verifyToken, SESSION_COOKIE } from "@/lib/session";
 
 const PUBLIC_PATHS = [
   "/api/login", "/api/login-users", "/api/setup", "/api/health", "/api/manutencao",
+  "/api/manutencao-status", // v3.2 (F4): estado calculado para o ecrã de login (público, só leitura)
   "/api/loja", "/api/imagens", // P2: portal do cliente (público, só leitura)
 ];
 

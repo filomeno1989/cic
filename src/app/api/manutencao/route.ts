@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bloqueado, segundosRestantes, registarFalha, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit";
 import { hashPin, pinLookupHmac } from "@/lib/pin";
+import { lerManutencao, limparCacheManutencao } from "@/lib/manutencao";
 
 // ============================================================
 // PORTA DE EMERGÊNCIA DO PROPRIETÁRIO - /api/manutencao
@@ -99,7 +100,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, mensagem: `Conta de gerente «${user.name}» criada. Entre com o PIN e troque-o depois em Recursos Humanos.` });
     }
 
-    return NextResponse.json({ error: "Ação desconhecida (use: listar | redefinir | criar_gerente)" }, { status: 400 });
+    // ---- MANUTENÇÃO v3.2 (F4): ver/desligar o modo de manutenção com a
+    // chave de recuperação - rede de segurança se o dono activar o modo e
+    // depois não conseguir entrar por alguma razão.
+    if (acao === "manutencao_estado") {
+      const e = await lerManutencao();
+      return NextResponse.json({ ok: true, manutencao: e });
+    }
+    if (acao === "manutencao_off") {
+      const antes = await lerManutencao();
+      if (!antes.modo) return NextResponse.json({ ok: true, mensagem: "O sistema não está em manutenção." });
+      await db.manutencao.upsert({
+        where: { id: "main" },
+        create: { id: "main", modo: "", mensagem: "", inicio: "", fim: "", atualizadoPor: "Chave de recuperação" },
+        update: { modo: "", mensagem: "", inicio: "", fim: "", atualizadoPor: "Chave de recuperação" },
+      });
+      limparCacheManutencao();
+      return NextResponse.json({ ok: true, mensagem: "Modo de manutenção DESLIGADO - o sistema voltou ao normal." });
+    }
+
+    return NextResponse.json({ error: "Ação desconhecida (use: listar | redefinir | criar_gerente | manutencao_estado | manutencao_off)" }, { status: 400 });
   } catch {
     return NextResponse.json({ error: "Erro de manutenção (base de dados indisponível?)" }, { status: 500 });
   }

@@ -11,11 +11,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2, Save, Printer, DatabaseBackup, Upload, Download, AlertTriangle, CheckCircle2, Trash2,
-  QrCode, Copy, Send, ExternalLink, Store,
+  QrCode, Copy, Send, ExternalLink, Store, Wrench, CalendarClock,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { StoreInfo } from "@/components/receipt";
 import type { SessionUser } from "@/lib/types";
+import { mostraHora, MSG_PADRAO_MANUTENCAO } from "@/lib/hora-manutencao";
 
 // ============================================================
 // v3.0 (M2): BACKUP AUTOMÁTICO DIÁRIO - lista + criar agora + descarregar.
@@ -56,6 +57,15 @@ export function DefinicoesView({
   const [portalLink, setPortalLink] = useState("");
   const [qrData, setQrData] = useState<string | null>(null);
 
+  // v3.2 (F4): MODO DE MANUTENÇÃO - fechar o sistema ao pessoal já ou agendar
+  const [manut, setManut] = useState<{ modo: string; mensagem: string; inicio: string; fim: string }>({ modo: "", mensagem: "", inicio: "", fim: "" });
+  const [manutMsg, setManutMsg] = useState(""); // mensagem personalizada (partilhada pelos 2 modos)
+  const [previsao, setPrevisao] = useState(""); // AGORA: previsão de retorno opcional
+  const [agInicio, setAgInicio] = useState(""); // AGENDADA: começo
+  const [agFim, setAgFim] = useState(""); // AGENDADA: fim
+  const [manutBusy, setManutBusy] = useState(false);
+  const [manutConfirm, setManutConfirm] = useState(false); // diálogo antes de fechar já
+
   // Limpeza total da base de dados
   const [resetOpen, setResetOpen] = useState(false);
   const [resetText, setResetText] = useState("");
@@ -69,6 +79,44 @@ export function DefinicoesView({
   useEffect(() => {
     setPortalLink(`${window.location.origin}/loja?msg=${encodeURIComponent(waMsg)}`);
   }, [waMsg]);
+
+  // v3.2 (F4): carregar o estado do modo de manutenção (só gerente)
+  const loadManut = async () => {
+    try {
+      const res = await fetch("/api/manutencao-modo");
+      if (!res.ok) return;
+      const d = await res.json();
+      setManut(d);
+      setManutMsg(d.mensagem ?? "");
+      setPrevisao(d.modo === "AGORA" ? d.fim ?? "" : "");
+      setAgInicio(d.modo === "AGENDADA" ? d.inicio ?? "" : "");
+      setAgFim(d.modo === "AGENDADA" ? d.fim ?? "" : "");
+    } catch { /* offline */ }
+  };
+  useEffect(() => { if (isManager) loadManut(); }, [isManager]);
+
+  // v3.2 (F4): guardar um modo ("" = desligar | AGORA | AGENDADA)
+  const guardarManut = async (modo: string, horarios?: { inicio?: string; fim?: string }) => {
+    setManutBusy(true);
+    try {
+      const res = await fetch("/api/manutencao-modo", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modo, mensagem: manutMsg, inicio: horarios?.inicio ?? agInicio, fim: horarios?.fim ?? previsao }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Erro ao guardar");
+      setManut((m) => ({ ...m, modo, mensagem: manutMsg, inicio: horarios?.inicio ?? (modo === "AGENDADA" ? agInicio : modo === "AGORA" ? new Date().toISOString().slice(0, 16) : ""), fim: horarios?.fim ?? (modo === "AGORA" ? previsao : modo === "AGENDADA" ? agFim : "") }));
+      toast({
+        title: modo === "" ? "Manutenção desligada - sistema aberto" : modo === "AGORA" ? "Sistema fechado para manutenção" : "Manutenção agendada",
+        description: modo === "" ? "O pessoal já pode entrar e trabalhar." : modo === "AGORA" ? "O pessoal vê a mensagem e não consegue entrar; o dono entra pelo «Acesso por código»." : "O pessoal vê o aviso até à hora de início; dentro do período o sistema bloqueia e reabre sozinho no fim.",
+      });
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro", variant: "destructive" });
+    } finally {
+      setManutBusy(false);
+    }
+  };
 
   // v3.0 (M2): carregar a lista de snapshots automáticos (só gerente)
   const loadAuto = async () => {
@@ -454,6 +502,72 @@ export function DefinicoesView({
         </ol>
       </div>
 
+      {/* ---------- v3.2 (F4): Modo de Manutenção (só gerente) ---------- */}
+      {isManager && (
+        <div className="card-lux p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <span className="w-9 h-9 rounded-lg bg-gold/10 flex items-center justify-center"><Wrench className="w-4.5 h-4.5 text-gold" /></span>
+            <div>
+              <h3 className="font-bold text-sm">Modo de Manutenção</h3>
+              <p className="text-xs text-muted-foreground">Fecha o sistema ao pessoal: ao entrarem, veem a mensagem e não conseguem trabalhar.</p>
+            </div>
+          </div>
+
+          {/* Estado actual */}
+          {manut.modo === "AGORA" && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+              <p className="text-xs font-bold text-amber-500 flex items-center gap-1.5"><Wrench className="w-3.5 h-3.5" /> EM MANUTENÇÃO AGORA</p>
+              <p className="text-xs text-muted-foreground">O pessoal não consegue entrar nem usar o sistema. Você entra pelo «Acesso por código» no ecrã de entrada, como sempre.</p>
+              <Button variant="outline" className="h-8 text-xs" onClick={() => guardarManut("")} disabled={manutBusy}>
+                {manutBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-green-500" />} Terminar manutenção agora
+              </Button>
+            </div>
+          )}
+          {manut.modo === "AGENDADA" && manut.inicio && manut.fim && (
+            <div className="rounded-lg border border-gold/40 bg-gold/5 p-3 space-y-2">
+              <p className="text-xs font-bold text-gold flex items-center gap-1.5"><CalendarClock className="w-3.5 h-3.5" /> AGENDADA: de {mostraHora(manut.inicio)} a {mostraHora(manut.fim)}</p>
+              <p className="text-xs text-muted-foreground">O pessoal vê o aviso já; dentro do período o sistema bloqueia e REABRE SOZINHO no fim - não precisa de voltar para desligar.</p>
+              <Button variant="outline" className="h-8 text-xs" onClick={() => guardarManut("")} disabled={manutBusy}>
+                {manutBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null} Cancelar agendamento
+              </Button>
+            </div>
+          )}
+
+          {/* Mensagem personalizada */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Mensagem que o pessoal vê (opcional)</Label>
+            <Textarea
+              rows={2}
+              value={manutMsg}
+              onChange={(e) => setManutMsg(e.target.value)}
+              placeholder={MSG_PADRAO_MANUTENCAO}
+              maxLength={300}
+            />
+          </div>
+
+          {/* Fechar agora */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Fechar agora · previsão de retorno (opcional)</Label>
+            <Input type="datetime-local" value={previsao} onChange={(e) => setPrevisao(e.target.value)} className="h-9 text-xs" />
+            <Button className="w-full h-9 text-xs" onClick={() => setManutConfirm(true)} disabled={manutBusy || manut.modo === "AGORA"}>
+              <Wrench className="w-3.5 h-3.5 mr-1" /> Entrar em manutenção agora
+            </Button>
+          </div>
+
+          {/* Agendar */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Agendar: o sistema fica offline das X às Y</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Input type="datetime-local" value={agInicio} onChange={(e) => setAgInicio(e.target.value)} className="h-9 text-xs" aria-label="Início da manutenção" />
+              <Input type="datetime-local" value={agFim} onChange={(e) => setAgFim(e.target.value)} className="h-9 text-xs" aria-label="Fim da manutenção" />
+            </div>
+            <Button variant="outline" className="w-full h-9 text-xs" onClick={() => guardarManut("AGENDADA", { inicio: agInicio, fim: agFim })} disabled={manutBusy || !agInicio || !agFim}>
+              <CalendarClock className="w-3.5 h-3.5 mr-1" /> Agendar manutenção
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ---------- Zona de Perigo (só gerente) ---------- */}
       {isManager && (
         <div className="card-lux p-5 space-y-3 border-destructive/40">
@@ -533,6 +647,33 @@ export function DefinicoesView({
             <Button variant="outline" onClick={() => setPendingRestore(null)} disabled={restoring}>Cancelar</Button>
             <Button variant="destructive" onClick={doRestore} disabled={restoring}>
               {restoring ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null} Sim, restaurar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* v3.2 (F4): confirmação antes de fechar o sistema já */}
+      <Dialog open={manutConfirm} onOpenChange={(v) => { if (!v && !manutBusy) setManutConfirm(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Wrench className="w-5 h-5 text-gold" /> Fechar o sistema agora?</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>O pessoal <b>não consegue entrar nem trabalhar</b> até terminar a manutenção - veem a mensagem logo ao abrir o sistema.</p>
+                {previsao && <p className="text-xs">Previsão de retorno mostrada: <b>{mostraHora(previsao)}</b> (o sistema NÃO reabre sozinho - só quando terminar aqui).</p>}
+                {!previsao && <p className="text-xs">Sem previsão de retorno definida - o pessoal vê só a mensagem de aguarde.</p>}
+                <p className="text-xs text-muted-foreground">Você continua a entrar pelo «Acesso por código» e pode desligar aqui a qualquer momento.</p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setManutConfirm(false)} disabled={manutBusy}>Cancelar</Button>
+            <Button
+              className="btn-gold"
+              onClick={async () => { setManutConfirm(false); await guardarManut("AGORA", { fim: previsao }); }}
+              disabled={manutBusy}
+            >
+              {manutBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Wrench className="w-4 h-4 mr-1" />} Fechar agora
             </Button>
           </DialogFooter>
         </DialogContent>

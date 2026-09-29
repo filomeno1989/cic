@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "next-themes";
 import { mt } from "@/lib/format";
@@ -8,6 +8,7 @@ import type { SessionUser } from "@/lib/types";
 import type { StoreInfo } from "@/components/receipt";
 import { APP_VERSION_LABEL, APP_SIGNATURE, APP_SIGNATURE_FULL } from "@/lib/version";
 import { MudarPinDialog } from "@/components/mudar-pin-dialog";
+import { ManutencaoAviso } from "@/components/manutencao-aviso";
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Wallet, Users2, FileBarChart, Settings,
   LogOut, Moon, Sun, Wifi, WifiOff, RefreshCw, Menu, X, Loader2, CheckCircle2, KeyRound,
@@ -50,6 +51,16 @@ export function AppShell({
   // v3.0: mudar a própria PIN (a conta do proprietário é blindada na RH de
   // propósito - aqui cada utilizador muda a SUA, provando a actual)
   const [pinOpen, setPinOpen] = useState(false);
+  // v3.2 (F4): o dono fechou o sistema a meio do uso → 503 {manutencao:true}
+  // em QUALQUER chamada (fetchT dispara "cic-manutencao") → cobre o ecrã
+  // inteiro com o aviso até a manutenção acabar (o dono nunca o vê: as
+  // chamadas dele passam sempre).
+  const [manutencaoMsg, setManutencaoMsg] = useState<string | null>(null);
+  useEffect(() => {
+    const abrir = (e: Event) => setManutencaoMsg((e as CustomEvent).detail || "O sistema está em manutenção. Aguarde, por favor - voltamos brevemente.");
+    window.addEventListener("cic-manutencao", abrir);
+    return () => window.removeEventListener("cic-manutencao", abrir);
+  }, []);
   const isManager = user.role === "GERENTE";
   const nav = NAV.filter((n) => !n.managerOnly || isManager);
 
@@ -198,6 +209,18 @@ export function AppShell({
 
       {/* v3.0: mudar a própria PIN (sistema inteiro, sem depender da porta de manutenção) */}
       <MudarPinDialog open={pinOpen} onOpenChange={setPinOpen} />
+
+      {/* v3.2 (F4): overlay de manutenção - cobre TUDO enquanto o dono mantiver fechado */}
+      {manutencaoMsg && (
+        <div className="fixed inset-0 z-[100] bg-[#0a0a0a]/98 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#141414] border border-[#d4af37]/25 rounded-2xl p-8 shadow-2xl max-w-sm w-full fade-up space-y-6">
+            <ManutencaoAviso mensagem={manutencaoMsg} compacto />
+            <Button variant="outline" className="w-full bg-[#1c1c1c] border-[#3f3f46] text-zinc-100 hover:border-[#d4af37]" onClick={onLogout}>
+              <LogOut className="w-4 h-4 mr-1" /> Sair
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

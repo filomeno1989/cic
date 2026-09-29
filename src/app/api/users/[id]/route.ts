@@ -4,6 +4,16 @@ import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 import { hashPin, pinLookupHmac } from "@/lib/pin"
 import { recalcularComissoesTotais } from "@/lib/comissao"
 
+// v3.3: validação da foto de perfil (igual ao POST /api/users)
+function fotoValida(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined; // campo não veio - não mexer
+  if (v === null || v === "") return null; // remover foto
+  const s = String(v);
+  if (!s.startsWith("data:image/")) throw new Error("Foto inválida - use JPG ou PNG")
+  if (s.length > 300_000) throw new Error("Foto demasiado grande - escolha outra mais leve")
+  return s;
+}
+
 // PUT /api/users/[id] - atualizar funcionário (só gerente - validado na SESSÃO)
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -13,7 +23,13 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (session.role !== "GERENTE") return forbidden("Apenas o gerente pode editar funcionários")
 
     const body = await req.json()
-    const { name, pin, role, baseSalary, commissionPct, commissionMode, commissionMinQty, phone, active } = body
+    const { name, pin, role, baseSalary, commissionPct, commissionMode, commissionMinQty, phone, active, photoUrl } = body
+    let foto: string | null | undefined
+    try {
+      foto = fotoValida(photoUrl)
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Foto inválida" }, { status: 400 })
+    }
     if (pin && String(pin).length < 4)
       return NextResponse.json({ error: "PIN deve ter 4+ dígitos" }, { status: 400 })
     if (pin && !/^\d+$/.test(String(pin)))
@@ -56,6 +72,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
           commissionMinQty: Math.max(0, Math.min(999, Math.floor(Number(commissionMinQty) || 0))),
         }),
         ...(phone !== undefined && { phone: phone || null }),
+        ...(foto !== undefined && { photoUrl: foto }), // v3.3: foto de perfil (avatar do login)
         ...(active !== undefined && { active: !!active }),
       },
     })

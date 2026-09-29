@@ -12,12 +12,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { mt, fmtDate, fmtDateTime } from "@/lib/format";
 import { currentMonthMZ } from "@/lib/tz";
 import { fetchT } from "@/lib/http";
+import { ficheiroParaAvatar } from "@/lib/imagem";
 import type { SessionUser } from "@/lib/types";
-import { UserPlus, HandCoins, Loader2, Trash2, FileSpreadsheet, Users2, Pencil, Archive, ArchiveRestore } from "lucide-react";
+import { UserPlus, HandCoins, Loader2, Trash2, FileSpreadsheet, Users2, Pencil, Archive, ArchiveRestore, Camera } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Employee = {
-  id: string; name: string; role: string; active: boolean; phone: string | null;
+  id: string; name: string; role: string; active: boolean; phone: string | null; photoUrl: string | null;
   baseSalary: number; commissionPct: number;
   commissionMode: string; commissionMinQty: number; createdAt: string;
 };
@@ -37,9 +38,10 @@ export function RhView({ user }: { user: SessionUser }) {
 
   const [empOpen, setEmpOpen] = useState(false);
   const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
-  const [empForm, setEmpForm] = useState({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", commissionMode: "TODAS", commissionMinQty: "2", phone: "" });
+  const [empForm, setEmpForm] = useState({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", commissionMode: "TODAS", commissionMinQty: "2", phone: "", photoUrl: "" });
   const [savingEmp, setSavingEmp] = useState(false);
   const savingEmpRef = useRef(false); // trava anti-duplo-clique (mesma cura do stock duplicado)
+  const fotoInputRef = useRef<HTMLInputElement>(null); // v3.3: picker da foto de perfil
 
   const [valeOpen, setValeOpen] = useState(false);
   const [valeForm, setValeForm] = useState({ userId: "", amount: "", reason: "" });
@@ -63,14 +65,25 @@ export function RhView({ user }: { user: SessionUser }) {
 
   const openNewEmp = () => {
     setEditingEmp(null);
-    setEmpForm({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", commissionMode: "TODAS", commissionMinQty: "2", phone: "" });
+    setEmpForm({ name: "", pin: "", role: "CAIXA", baseSalary: "", commissionPct: "", commissionMode: "TODAS", commissionMinQty: "2", phone: "", photoUrl: "" });
     setEmpOpen(true);
   };
 
   const openEditEmp = (e: Employee) => {
     setEditingEmp(e);
-    setEmpForm({ name: e.name, pin: "", role: e.role, baseSalary: String(e.baseSalary), commissionPct: String(e.commissionPct), commissionMode: e.commissionMode === "DIA" ? "DIA" : "TODAS", commissionMinQty: String(e.commissionMinQty ?? 2), phone: e.phone ?? "" });
+    setEmpForm({ name: e.name, pin: "", role: e.role, baseSalary: String(e.baseSalary), commissionPct: String(e.commissionPct), commissionMode: e.commissionMode === "DIA" ? "DIA" : "TODAS", commissionMinQty: String(e.commissionMinQty ?? 2), phone: e.phone ?? "", photoUrl: e.photoUrl ?? "" });
     setEmpOpen(true);
+  };
+
+  // v3.3: escolher foto de perfil - comprime NO APARELHO (crop quadrado 320px JPEG)
+  const escolherFoto = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const dataUrl = await ficheiroParaAvatar(file);
+      setEmpForm((f) => ({ ...f, photoUrl: dataUrl }));
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro na foto", variant: "destructive" });
+    }
   };
 
   const saveEmp = async () => {
@@ -94,6 +107,7 @@ export function RhView({ user }: { user: SessionUser }) {
         commissionMode: empForm.commissionMode,
         commissionMinQty: parseInt(empForm.commissionMinQty) || 0,
         phone: empForm.phone,
+        photoUrl: empForm.photoUrl || null, // v3.3: foto de perfil (null = remover)
         ...(empForm.pin ? { pin: empForm.pin } : {}),
       };
       const res = editingEmp
@@ -330,7 +344,16 @@ export function RhView({ user }: { user: SessionUser }) {
             {employees.map((e) => (
               <div key={e.id} className={`card-lux p-4 space-y-2 ${!e.active ? "opacity-50" : ""}`}>
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold">{e.name}</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {e.photoUrl ? (
+                      <img src={e.photoUrl} alt="" className="w-9 h-9 rounded-full object-cover border border-[#d4af37]/40 shrink-0" />
+                    ) : (
+                      <span className="w-9 h-9 rounded-full bg-muted border border-border text-xs font-semibold flex items-center justify-center shrink-0">
+                        {e.name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("")}
+                      </span>
+                    )}
+                    <p className="font-semibold truncate">{e.name}</p>
+                  </div>
                   <Badge variant={e.role === "GERENTE" ? "default" : "secondary"} className={e.role === "GERENTE" ? "btn-gold" : ""}>
                     {e.role === "GERENTE" ? "Gerente" : "Caixa"}
                   </Badge>
@@ -377,6 +400,30 @@ export function RhView({ user }: { user: SessionUser }) {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>{editingEmp ? "Editar Funcionário" : "Novo Funcionário"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            {/* v3.3: foto de perfil - aparece no avatar do ecrã de login */}
+            <div className="flex items-center gap-3">
+              <div className="relative shrink-0">
+                {empForm.photoUrl ? (
+                  <img src={empForm.photoUrl} alt="Foto de perfil" className="w-16 h-16 rounded-full object-cover border-2 border-[#d4af37]/60" />
+                ) : (
+                  <div className="w-16 h-16 rounded-full bg-muted border-2 border-dashed border-muted-foreground/40 flex items-center justify-center text-muted-foreground">
+                    <Users2 className="w-7 h-7" />
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1">
+                <input ref={fotoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { escolherFoto(e.target.files?.[0]); e.target.value = ""; }} />
+                <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => fotoInputRef.current?.click()} disabled={savingEmp}>
+                  <Camera className="w-3.5 h-3.5 mr-1" /> {empForm.photoUrl ? "Trocar foto" : "Escolher foto"}
+                </Button>
+                {empForm.photoUrl && (
+                  <Button type="button" size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => setEmpForm((f) => ({ ...f, photoUrl: "" }))} disabled={savingEmp}>
+                    Remover foto
+                  </Button>
+                )}
+                <p className="text-[10px] text-muted-foreground leading-snug">Aparece no ecrã de login ao escolher o nome.</p>
+              </div>
+            </div>
             <div><Label className="text-xs">Nome *</Label><Input value={empForm.name} onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-2">
               <div>

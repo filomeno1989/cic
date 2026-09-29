@@ -3,10 +3,22 @@ import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 import { hashPin, pinLookupHmac } from "@/lib/pin"
 
+// v3.3: validação da foto de perfil - só data URL de imagem, até ~300KB
+// (as fotos já chegam comprimidas a 320px pelo aparelho; isto é rede de segurança)
+function fotoValida(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined; // campo não veio - não mexer
+  if (v === null || v === "") return null; // remover foto
+  const s = String(v);
+  if (!s.startsWith("data:image/")) throw new Error("Foto inválida - use JPG ou PNG")
+  if (s.length > 300_000) throw new Error("Foto demasiado grande - escolha outra mais leve")
+  return s;
+}
+
 // Campos seguros para a resposta - NUNCA devolver pin/pinHash/pinLookup
-function seguro(u: { id: string; name: string; role: string; active: boolean; phone: string | null; baseSalary: number; commissionPct: number; commissionMode: string; commissionMinQty: number; createdAt: Date }) {
+function seguro(u: { id: string; name: string; role: string; active: boolean; phone: string | null; photoUrl: string | null; baseSalary: number; commissionPct: number; commissionMode: string; commissionMinQty: number; createdAt: Date }) {
   return {
     id: u.id, name: u.name, role: u.role, active: u.active, phone: u.phone,
+    photoUrl: u.photoUrl,
     baseSalary: u.baseSalary, commissionPct: u.commissionPct,
     commissionMode: u.commissionMode, commissionMinQty: u.commissionMinQty,
     createdAt: u.createdAt,
@@ -25,7 +37,7 @@ export async function GET(req: NextRequest) {
       where: { isSystem: false },
       orderBy: { name: "asc" },
       select: {
-        id: true, name: true, role: true, active: true, phone: true,
+        id: true, name: true, role: true, active: true, phone: true, photoUrl: true,
         baseSalary: true, commissionPct: true,
         commissionMode: true, commissionMinQty: true, createdAt: true,
       },
@@ -44,7 +56,14 @@ export async function POST(req: NextRequest) {
     if (session.role !== "GERENTE") return forbidden("Apenas o gerente pode criar funcionários")
 
     const body = await req.json()
-    const { name, pin, role, baseSalary, commissionPct, commissionMode, commissionMinQty, phone } = body
+    const { name, pin, role, baseSalary, commissionPct, commissionMode, commissionMinQty, phone, photoUrl } = body
+    let foto: string | null = null
+    try {
+      const f = fotoValida(photoUrl)
+      if (f) foto = f
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Foto inválida" }, { status: 400 })
+    }
     if (!name || !pin) return NextResponse.json({ error: "Nome e PIN obrigatórios" }, { status: 400 })
     if (String(pin).length < 4) return NextResponse.json({ error: "PIN deve ter 4+ dígitos" }, { status: 400 })
     if (!/^\d+$/.test(String(pin))) return NextResponse.json({ error: "PIN deve conter apenas números" }, { status: 400 })
@@ -62,6 +81,7 @@ export async function POST(req: NextRequest) {
         commissionMode: commissionMode === "DIA" ? "DIA" : "TODAS",
         commissionMinQty: Math.max(0, Math.min(999, Math.floor(Number(commissionMinQty) || 0))),
         phone: phone || null,
+        photoUrl: foto, // v3.3: foto de perfil (avatar do login)
         isSystem: false, // contas criadas na RH nunca são de sistema
       },
     })

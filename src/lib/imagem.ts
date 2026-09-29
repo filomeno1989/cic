@@ -43,3 +43,38 @@ export function dataUrlParaPayload(dataUrl: string): ImagemPayload {
   const mime = /data:([^;]+)/.exec(head)?.[1] ?? "image/jpeg";
   return { data, mime };
 }
+
+// ============================================================
+// v3.3 - Foto de PERFIL (avatar do login): crop QUADRADO centrado
+// (rostos ficam no meio) + redimensiona para máx. 320px JPEG q0.85
+// (~15-35KB) - cabe na coluna photoUrl e sobe rápido na rede da
+// Vodacom/Movitel. Devolve o data URL COMPLETO pronto a gravar.
+// ============================================================
+export async function ficheiroParaAvatar(file: File, maxDim = 320, quality = 0.85): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("Escolha um ficheiro de imagem (JPG/PNG)");
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(new Error("Não foi possível ler o ficheiro"));
+    fr.readAsDataURL(file);
+  });
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error("Formato de imagem não suportado pelo navegador - use JPG ou PNG"));
+    im.src = dataUrl;
+  });
+
+  // crop quadrado centrado (a foto de perfil corta pelo meio, como WhatsApp/Instagram)
+  const lado = Math.min(img.width, img.height);
+  const sx = (img.width - lado) / 2;
+  const sy = (img.height - lado) / 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = maxDim;
+  canvas.height = maxDim;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Navegador sem suporte para processar imagem");
+  ctx.drawImage(img, sx, sy, lado, lado, 0, 0, maxDim, maxDim);
+  return canvas.toDataURL("image/jpeg", quality);
+}

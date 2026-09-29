@@ -5,7 +5,9 @@ import { db } from "@/lib/db";
  * GET /api/login-users - lista de utilizadores para os CARTÕES do ecrã de login.
  *
  * PÚBLICO (sem sessão) porque é usado no próprio ecrã de entrada.
- * Devolve o mínimo necessário: id, name, role - NUNCA PINs, salários ou contactos.
+ * Devolve o mínimo necessário: id, name, role e a foto de perfil (v3.3 -
+ * avatar real no login; as fotos já são comprimidas para ~320px no aparelho).
+ * NUNCA PINs, salários ou contactos.
  * A conta do proprietário (isSystem) NUNCA aparece aqui - ela entra pelo
  * "Acesso por código" no ecrã de login (PIN validado em /api/login sem userId).
  */
@@ -14,7 +16,7 @@ export async function GET() {
     const users = await db.user.findMany({
       where: { active: true, isSystem: false },
       orderBy: [{ role: "desc" }, { name: "asc" }], // gerentes primeiro
-      select: { id: true, name: true, role: true },
+      select: { id: true, name: true, role: true, photoUrl: true },
     });
     return NextResponse.json(users);
   } catch {

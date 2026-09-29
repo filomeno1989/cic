@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Delete, Loader2, Lock, KeyRound, Sparkles, ArrowLeft, Eye, EyeOff, Clock, ChevronDown } from "lucide-react";
+import { Delete, Loader2, Lock, KeyRound, Sparkles, ArrowLeft, Eye, EyeOff, Clock, ChevronDown, UserRound } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
 import { fetchT } from "@/lib/http";
@@ -19,7 +19,9 @@ type EstadoManutencao = {
   mensagem: string; inicio: string; fim: string;
 };
 
-type LoginUser = { id: string; name: string; role: string };
+// v3.3: photoUrl = foto de perfil (data URL JPEG 320px, feita na RH) -
+// é a "avatar da foto" que aparece no topo do cartão ao escolher o nome
+type LoginUser = { id: string; name: string; role: string; photoUrl?: string | null };
 
 const initials = (name: string) =>
   name
@@ -385,16 +387,31 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
             ) : (
               /* ---------- Login normal ---------- */
               <>
-                {selected ? (
-                  /* v3.2: utilizador escolhido - o avatar aparece e o dropdown cede o lugar */
-                  <div className="flex flex-col items-center gap-2 mb-4">
-                    <span className="w-16 h-16 rounded-full bg-gradient-to-br from-[#d4af37] to-[#8a6d1f] text-black flex items-center justify-center font-serif text-xl border-2 border-[#d4af37] shadow-lg">
+                {/* v3.3: AVATAR GRANDE no topo do cartão (ideia da imagem de referência
+                    que o dono partilhou - glassmorphism com avatar em cima): silhueta
+                    enquanto ninguém é escolhido; FOTO real (ou iniciais) ao escolher. */}
+                <div className="flex flex-col items-center mb-4">
+                  {selected && selected.photoUrl ? (
+                    <img
+                      src={selected.photoUrl}
+                      alt={selected.name}
+                      className="w-24 h-24 rounded-full object-cover border-2 border-[#d4af37] shadow-[0_0_30px_rgba(212,175,55,0.35)] fade-up"
+                    />
+                  ) : selected ? (
+                    <span className="w-24 h-24 rounded-full bg-gradient-to-br from-[#d4af37] to-[#8a6d1f] text-black flex items-center justify-center font-serif text-2xl border-2 border-[#d4af37] shadow-[0_0_30px_rgba(212,175,55,0.35)] fade-up">
                       {initials(selected.name)}
                     </span>
-                    <div className="text-center">
-                      <p className="text-sm font-semibold text-zinc-100 leading-tight">{selected.name}</p>
+                  ) : (
+                    /* silhueta genérica (como a referência) - convida a escolher o nome */
+                    <div className="w-24 h-24 rounded-full bg-[#1c1c1c] border-2 border-[#d4af37]/25 flex items-center justify-center shadow-[0_0_24px_rgba(212,175,55,0.12)]">
+                      <UserRound className="w-11 h-11 text-[#52525b]" strokeWidth={1.5} />
+                    </div>
+                  )}
+                  {selected && (
+                    <>
+                      <p className="mt-2.5 text-sm font-semibold text-zinc-100 leading-tight text-center">{selected.name}</p>
                       <span
-                        className={`inline-block mt-1 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
+                        className={`mt-1 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
                           selected.role === "GERENTE"
                             ? "text-[#d4af37] border-[#d4af37]/50"
                             : "text-zinc-500 border-zinc-700"
@@ -402,58 +419,62 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
                       >
                         {selected.role === "GERENTE" ? "Gerente" : "Caixa"}
                       </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (submitTimer.current) window.clearTimeout(submitTimer.current);
-                        setSelected(null);
-                        setPin("");
-                        setError(false);
-                      }}
-                      className="flex items-center gap-1 text-[11px] text-[#a1a1aa] hover:text-[#d4af37] transition-colors"
-                    >
-                      <ChevronDown className="w-3.5 h-3.5" /> Trocar utilizador
-                    </button>
-                  </div>
-                ) : (
-                  showSelect && (
-                    <div className="mb-4">
-                      <label className="block text-[10px] uppercase tracking-widest text-[#a1a1aa] mb-1.5 px-1">
-                        Utilizador
-                      </label>
-                      <Select value="" onValueChange={pick} disabled={loading}>
-                        <SelectTrigger className="w-full h-12 rounded-xl bg-[#1c1c1c] border-[#3f3f46] text-zinc-100 text-sm hover:border-[#d4af37]/60 hover:bg-[#1c1c1c] data-[placeholder]:text-[#a1a1aa] focus-visible:border-[#d4af37] focus-visible:ring-[#d4af37]/30 aria-invalid:border-red-500">
-                          <SelectValue placeholder="Selecionar utilizador…" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-[#141414] border-[#3f3f46] text-zinc-100 rounded-xl max-h-72">
-                          {users.map((u) => (
-                            <SelectItem
-                              key={u.id}
-                              value={u.id}
-                              className="rounded-lg focus:bg-[#2a2310] focus:text-[#e9d9a8] [&_svg:not([class*='text-'])]:text-[#d4af37]"
-                            >
-                              <span className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (submitTimer.current) window.clearTimeout(submitTimer.current);
+                          setSelected(null);
+                          setPin("");
+                          setError(false);
+                        }}
+                        className="mt-1.5 flex items-center gap-1 text-[11px] text-[#a1a1aa] hover:text-[#d4af37] transition-colors"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" /> Trocar utilizador
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {!selected && showSelect && (
+                  <div className="mb-4">
+                    <label className="block text-[10px] uppercase tracking-widest text-[#a1a1aa] mb-1.5 px-1">
+                      Utilizador
+                    </label>
+                    <Select value="" onValueChange={pick} disabled={loading}>
+                      <SelectTrigger className="w-full h-12 rounded-xl bg-[#1c1c1c] border-[#3f3f46] text-zinc-100 text-sm hover:border-[#d4af37]/60 hover:bg-[#1c1c1c] data-[placeholder]:text-[#a1a1aa] focus-visible:border-[#d4af37] focus-visible:ring-[#d4af37]/30 aria-invalid:border-red-500">
+                        <SelectValue placeholder="Selecionar utilizador…" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#141414] border-[#3f3f46] text-zinc-100 rounded-xl max-h-72">
+                        {users.map((u) => (
+                          <SelectItem
+                            key={u.id}
+                            value={u.id}
+                            className="rounded-lg focus:bg-[#2a2310] focus:text-[#e9d9a8] [&_svg:not([class*='text-'])]:text-[#d4af37]"
+                          >
+                            <span className="flex items-center gap-2">
+                              {u.photoUrl ? (
+                                <img src={u.photoUrl} alt="" className="w-7 h-7 shrink-0 rounded-full object-cover border border-[#d4af37]/40" />
+                              ) : (
                                 <span className="w-7 h-7 shrink-0 rounded-full bg-[#2a2310] border border-[#d4af37]/40 text-[#e9d9a8] text-[10px] font-serif flex items-center justify-center">
                                   {initials(u.name)}
                                 </span>
-                                <span className="text-sm">{u.name}</span>
-                                <span
-                                  className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
-                                    u.role === "GERENTE"
-                                      ? "text-[#d4af37] border-[#d4af37]/50"
-                                      : "text-zinc-500 border-zinc-700"
-                                  }`}
-                                >
-                                  {u.role === "GERENTE" ? "Gerente" : "Caixa"}
-                                </span>
+                              )}
+                              <span className="text-sm">{u.name}</span>
+                              <span
+                                className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
+                                  u.role === "GERENTE"
+                                    ? "text-[#d4af37] border-[#d4af37]/50"
+                                    : "text-zinc-500 border-zinc-700"
+                                }`}
+                              >
+                                {u.role === "GERENTE" ? "Gerente" : "Caixa"}
                               </span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 )}
 
                 {codeMode && (

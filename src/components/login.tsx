@@ -155,6 +155,19 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
   };
 
   const showCards = !codeMode && usersLoaded && users.length > 0;
+
+  // v3.0 (U4): aviso quando a sessão expirou a meio do dia - o interceptor
+  // manda para /gestao?expirada=1; aqui explicamos ao pessoal o que aconteceu.
+  const [avisoExpirada, setAvisoExpirada] = useState(false);
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("expirada") === "1") {
+        setAvisoExpirada(true);
+        window.history.replaceState(null, "", "/gestao"); // limpa o parâmetro do endereço
+      }
+    } catch { /* */ }
+  }, []);
+
   const hint = codeMode
     ? "Digite o seu código de acesso"
     : selected
@@ -270,6 +283,11 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
             )}
 
             <p className="text-center text-[11px] text-[#a1a1aa] mb-2">{hint}</p>
+            {avisoExpirada && (
+              <p className="text-center text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 mb-3">
+                A sua sessão expirou por segurança. Entre de novo para continuar.
+              </p>
+            )}
             {/* v2.9: barra de código segmentada - cada dígito no seu quadrado,
                 com o olho para revelar/esconder (pediu o dono). Começa em 4
                 quadrados e cresce até 6, como as bolinhas antes. */}

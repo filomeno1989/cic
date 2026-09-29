@@ -272,3 +272,15 @@ model Settings {
   facebookUrl       String  @default("") // link completo do Facebook (redes sociais no /loja)
   tiktokUrl         String  @default("") // link completo do TikTok (preparado para o futuro)
 }
+
+// v3.0 (M2 da varredura de melhorias): snapshot diário automático do backup.
+// Um por dia (fuso de Maputo), guardado na própria base de dados - protege
+// contra erros lógicos (restauro mau, eliminação acidental). Mantém os últimos 7.
+model BackupAuto {
+  id       String   @id @default(cuid())
+  data     String   @unique // YYYY-MM-DD de Maputo
+  json     String // payload completo (mesmo formato do export manual)
+  tamanho  Int      @default(0) // bytes do JSON
+  comFotos Boolean  @default(true)
+  criadoEm DateTime @default(now())
+}

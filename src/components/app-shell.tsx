@@ -7,9 +7,10 @@ import { mt } from "@/lib/format";
 import type { SessionUser } from "@/lib/types";
 import type { StoreInfo } from "@/components/receipt";
 import { APP_VERSION_LABEL, APP_SIGNATURE, APP_SIGNATURE_FULL } from "@/lib/version";
+import { MudarPinDialog } from "@/components/mudar-pin-dialog";
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Wallet, Users2, FileBarChart, Settings,
-  LogOut, Moon, Sun, Wifi, WifiOff, RefreshCw, Menu, X, Loader2, CheckCircle2,
+  LogOut, Moon, Sun, Wifi, WifiOff, RefreshCw, Menu, X, Loader2, CheckCircle2, KeyRound,
 } from "lucide-react";
 import Image from "next/image";
 
@@ -46,6 +47,9 @@ export function AppShell({
 }) {
   const { resolvedTheme, setTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
+  // v3.0: mudar a própria PIN (a conta do proprietário é blindada na RH de
+  // propósito - aqui cada utilizador muda a SUA, provando a actual)
+  const [pinOpen, setPinOpen] = useState(false);
   const isManager = user.role === "GERENTE";
   const nav = NAV.filter((n) => !n.managerOnly || isManager);
 
@@ -85,9 +89,14 @@ export function AppShell({
               {isManager ? "Gerente" : "Caixa"} · comissão {user.commissionPct}%
             </p>
           </div>
-          <Button size="icon" variant="ghost" onClick={onLogout} title="Sair">
-            <LogOut className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button size="icon" variant="ghost" onClick={() => setPinOpen(true)} title="Mudar a minha PIN">
+              <KeyRound className="w-4 h-4" />
+            </Button>
+            <Button size="icon" variant="ghost" onClick={onLogout} title="Sair">
+              <LogOut className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
         {/* Versão + assinatura de produção - discreto, sempre visível no fim da barra lateral */}
         <div className="mt-3 pt-2 text-center select-none" style={{ borderTop: "1px dashed color-mix(in oklab, var(--gold) 25%, transparent)" }}>
@@ -186,6 +195,9 @@ export function AppShell({
           </footer>
         </main>
       </div>
+
+      {/* v3.0: mudar a própria PIN (sistema inteiro, sem depender da porta de manutenção) */}
+      <MudarPinDialog open={pinOpen} onOpenChange={setPinOpen} />
     </div>
   );
 }

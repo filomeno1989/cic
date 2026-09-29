@@ -12,6 +12,7 @@ import { RelatoriosView } from "@/components/relatorios-view";
 import { DefinicoesView } from "@/components/definicoes-view";
 import { type StoreInfo } from "@/components/receipt";
 import { cacheSettings, getCachedSettings, getQueue, getRejected, syncQueue, FALHAS_PARA_ALERTA } from "@/lib/offline";
+import { tratar401 } from "@/lib/sessao401";
 import type { SessionUser, ProductVariantFlat } from "@/lib/types";
 
 const SESSION_KEY = "cic_session_user";
@@ -115,6 +116,7 @@ export default function Home() {
   const loadStore = useCallback(async () => {
     try {
       const res = await fetch("/api/settings");
+      if (tratar401("/api/settings", res.status)) return; // v3.0 (U4): sessão expirou → redireciona
       if (res.ok) {
         const data = await res.json();
         setStore(data);
@@ -126,6 +128,7 @@ export default function Home() {
   const loadCatalog = useCallback(async () => {
     try {
       const res = await fetch("/api/products");
+      if (tratar401("/api/products", res.status)) return; // v3.0 (U4)
       if (res.ok) setCatalog(await res.json());
     } catch { /* offline */ }
   }, []);
@@ -135,6 +138,24 @@ export default function Home() {
     loadStore();
     loadCatalog();
   }, [user, loadStore, loadCatalog]);
+
+  // ----- v3.0 (M2): backup automático diário -----
+  // Na 1ª abertura do dia por um GERENTE (e online), o sistema pede ao
+  // servidor o snapshot do dia (o servidor deduplica por data de Maputo;
+  // este guarda local evita martelar a API nas aberturas seguintes).
+  useEffect(() => {
+    if (!user || user.role !== "GERENTE" || !navigator.onLine) return;
+    const hoje = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD local
+    try {
+      if (localStorage.getItem("cic_last_autobackup") === hoje) return;
+    } catch { /* storage bloqueado - segue, o servidor deduplica */ }
+    const t = setTimeout(() => {
+      void fetch("/api/backup/auto", { method: "POST" })
+        .then((r) => { if (r.ok) { try { localStorage.setItem("cic_last_autobackup", hoje); } catch { /* */ } } })
+        .catch(() => { /* offline: tenta no próximo arranque */ });
+    }, 4000); // espera o arranque da sessão (não compete com a carga inicial)
+    return () => clearTimeout(t);
+  }, [user]);
 
   const bumpData = useCallback(() => {
     loadCatalog();

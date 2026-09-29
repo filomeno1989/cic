@@ -39,6 +39,9 @@ type HistoryData = {
 export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; catalog: ProductVariantFlat[]; onReload: () => void }) {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
+  // v3.0 (F2 da varredura): filtros por categoria e marca na lista
+  const [catFiltro, setCatFiltro] = useState("TODAS");
+  const [marcaFiltro, setMarcaFiltro] = useState("TODAS");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<{ id: string; code: string; name: string; category: string; brand: string } | null>(null);
   const [draft, setDraft] = useState({ code: "", name: "", category: "", brand: "" });
@@ -251,13 +254,19 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
   };
 
   const filtered = useMemo(() => {
+    // v3.0 (F2): primeiro os filtros de categoria/marca (só entram os que
+    // têm a lista não vazia - produtos sem marca só aparecem no filtro
+    // "Todas" ou no próprio valor, nunca desaparecem por engano)
+    let base = lista;
+    if (catFiltro !== "TODAS") base = base.filter((v) => (v.category ?? "") === catFiltro);
+    if (marcaFiltro !== "TODAS") base = base.filter((v) => marcaFiltro === "(sem marca)" ? !v.brand : (v.brand ?? "") === marcaFiltro);
     const q = search.toLowerCase().trim();
-    if (!q) return lista;
-    return lista.filter((v) =>
+    if (!q) return base;
+    return base.filter((v) =>
       v.productName.toLowerCase().includes(q) || v.productCode.toLowerCase().includes(q) ||
       variantLabel(v).toLowerCase().includes(q) || (v.brand ?? "").toLowerCase().includes(q)
     );
-  }, [lista, search]);
+  }, [lista, search, catFiltro, marcaFiltro]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, ProductVariantFlat[]>();
@@ -512,6 +521,27 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input placeholder="Procurar produto…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
         </div>
+        {/* v3.0 (F2): filtros por categoria e marca */}
+        <Select value={catFiltro} onValueChange={setCatFiltro}>
+          <SelectTrigger className="w-[150px] h-10"><SelectValue placeholder="Categoria" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="TODAS">Todas as categorias</SelectItem>
+            {productCats.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={marcaFiltro} onValueChange={setMarcaFiltro}>
+          <SelectTrigger className="w-[140px] h-10"><SelectValue placeholder="Marca" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="TODAS">Todas as marcas</SelectItem>
+            <SelectItem value="(sem marca)">(sem marca)</SelectItem>
+            {productBrands.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {(catFiltro !== "TODAS" || marcaFiltro !== "TODAS") && (
+          <Button variant="ghost" className="h-10 text-xs text-muted-foreground" onClick={() => { setCatFiltro("TODAS"); setMarcaFiltro("TODAS"); }}>
+            <X className="w-3.5 h-3.5 mr-1" /> Limpar filtros
+          </Button>
+        )}
         <Button className="btn-gold" onClick={openNew}>
           <Plus className="w-4 h-4 mr-1" /> Novo Produto
         </Button>
@@ -911,7 +941,7 @@ export function ProdutosView({ user, catalog, onReload }: { user: SessionUser; c
                 {v.removed && (
                   <div className="flex items-center justify-between rounded-md bg-amber-500/10 border border-amber-500/40 px-2.5 py-1.5">
                     <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">Esta variação será ARQUIVADA ao gravar (o histórico de vendas fica intacto).</p>
-                    <Button type="button" size="sm" variant="ghost" className="h-6 text-[11px] text-amber-700 dark:text-amber-400" onClick={() => setVariants(variants.map((x, i) => (i === idx ? { ...x, removed: false } : x)))}>
+                    <Button type="button" size="sm" variant="ghost" className="h-7 text-[11px] text-amber-700 dark:text-amber-400" onClick={() => setVariants(variants.map((x, i) => (i === idx ? { ...x, removed: false } : x)))}>
                       <RotateCcw className="w-3 h-3 mr-1" /> Reativar
                     </Button>
                   </div>

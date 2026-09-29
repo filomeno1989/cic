@@ -205,15 +205,17 @@
     font-size: 11px !important;
     line-height: 1.35 !important;
   }
-  #thermal-receipt .receipt-58 {
+  /* v3.0 (U1): o seletor descendente nunca batia - .receipt-58 fica NO
+     próprio #thermal-receipt, não dentro dele. Corrigido para a forma certa. */
+  #thermal-receipt.receipt-58 {
     font-size: 9.5px !important;
   }
+  /* v3.0 (U1): o @page FIXO 80mm quebrava as impressoras de 58mm.
+     O ReceiptDialog injeta o @page certo (58/80) enquanto está aberto;
+     este é só o predefinido para o resto do sistema. */
   @page {
     margin: 0;
     size: 80mm auto;
-  }
-  #thermal-receipt.receipt-58-page {
-    width: 58mm !important;
   }
 }
 

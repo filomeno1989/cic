@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { mt, fmtDate, fmtDateTime, waLink, methodLabel, PAYMENT_METHODS } from "@/lib/format";
 import { fetchT } from "@/lib/http";
 import type { CustomerFlat, SessionUser } from "@/lib/types";
-import { Search, UserPlus, Phone, HandCoins, History, Loader2, Wallet, MessageCircle, Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { Search, UserPlus, Phone, HandCoins, History, Loader2, Wallet, MessageCircle, Archive, ArchiveRestore, Trash2, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type CustomerDetail = CustomerFlat & {
@@ -194,11 +194,40 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
     }
   };
 
-  const cobrancaMsg = (c: CustomerFlat) =>
-    waLink(
+  // v3.0 (M3 da varredura): o lembrete agora diz HÁ QUANTOS DIAS a dívida
+  // está por liquidar (dias desde a última compra a crédito/amortização)
+  // - "quanto deve" sem contexto não corre bem; "de há 3 semanas" sim.
+  const diasTexto = (c: CustomerFlat) => {
+    const d = c.diasFiado;
+    if (d == null) return "";
+    if (d === 0) return "de hoje";
+    if (d === 1) return "de há 1 dia";
+    if (d < 14) return `de há ${d} dias`;
+    const sem = Math.floor(d / 7);
+    if (sem < 8) return `de há ${sem} semana${sem > 1 ? "s" : ""}`;
+    const mes = Math.floor(d / 30);
+    return `de há ${mes} mês${mes > 1 ? "es" : ""}`;
+  };
+
+  const cobrancaMsg = (c: CustomerFlat) => {
+    const quando = diasTexto(c);
+    return waLink(
       c.phone,
-      `Olá ${c.name}! 😊\nAqui é da *CIC Fragrâncias & Glamour*.\n\nPassando só para lembrar com carinho que consta um saldo de *${mt(c.balance)}* na sua conta de fiação.\n\nQuando puder, apareça na loja ou Combine connosco o pagamento. Obrigado pela preferência! ✨`
+      `Olá ${c.name}! 😊\nAqui é da *CIC Fragrâncias & Glamour*.\n\nPassando só para lembrar com carinho que consta um saldo de *${mt(c.balance)}* na sua conta de fiação${quando ? ` (compra ${quando})` : ""}.\n\nQuando puder, apareça na loja ou combine connosco o pagamento. Obrigado pela preferência! ✨`
     );
+  };
+
+  // v3.0 (M3): resumo de cobrança para colar numa transmissão de WhatsApp
+  const copiarCobrancas = async () => {
+    const linhas = debtors.map((c) => `• ${c.name}${c.phone ? ` (${c.phone})` : ""} - deve ${mt(c.balance)}${diasTexto(c) ? ` (${diasTexto(c)})` : ""}`);
+    const texto = `Lembretes de fiação - ${new Date().toLocaleDateString("pt-PT")}\n\n${linhas.join("\n")}\n\nTotal a receber: ${mt(debtors.reduce((a, c) => a + c.balance, 0))}`;
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast({ title: "Lista copiada", description: "Cole numa transmissão de WhatsApp ou no seu bloco de notas." });
+    } catch {
+      toast({ title: "Não foi possível copiar", variant: "destructive" });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -221,6 +250,9 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
         <div className="card-lux p-4">
           <h3 className="text-sm font-semibold flex items-center gap-2 mb-2">
             <Wallet className="w-4 h-4 text-amber-600" /> Clientes Devedores - total {mt(debtors.reduce((a, c) => a + c.balance, 0))}
+            <Button size="sm" variant="outline" className="ml-auto h-7 text-xs" onClick={copiarCobrancas}>
+              <Copy className="w-3 h-3 mr-1" /> Copiar lista
+            </Button>
           </h3>
           <div className="space-y-2">
             {debtors.map((c) => (
@@ -228,6 +260,11 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
                 <span>
                   <span className="font-medium">{c.name}</span>
                   <span className="text-muted-foreground text-xs ml-2">{c.phone}</span>
+                  {c.diasFiado != null && (
+                    <Badge variant="outline" className="ml-2 text-[10px] px-1.5 py-0 text-amber-700 border-amber-500/40 shrink-0">
+                      há {c.diasFiado === 0 ? "hoje" : c.diasFiado === 1 ? "1 dia" : `${c.diasFiado} dias`}
+                    </Badge>
+                  )}
                 </span>
                 <span className="flex items-center gap-2">
                   <Badge className="bg-amber-500 hover:bg-amber-500 text-white">{mt(c.balance)}</Badge>

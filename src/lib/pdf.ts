@@ -4,7 +4,9 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
-export type PdfStore = { storeName: string; phone: string; address: string };
+// v3.0 (F1): o NUIT da loja (já existia nas Definições) passa a sair no
+// cabeçalho de TODOS os relatórios PDF.
+export type PdfStore = { storeName: string; phone: string; address: string; nuit?: string };
 
 // ---- Paleta da marca ----
 const GOLD: [number, number, number] = [176, 141, 40];
@@ -92,7 +94,7 @@ function drawPageHeader(ctx: DocCtx, withLogo: boolean) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   doc.setTextColor(210, 210, 210);
-  const contact = [store.address, store.phone].filter(Boolean).join("  ·  ");
+  const contact = [store.address, store.phone, store.nuit ? `NUIT: ${store.nuit}` : null].filter(Boolean).join("  ·  ");
   doc.text(contact || "Beira, Moçambique", withLogo && logo ? 30 : 14, 19);
   doc.text("Sistema de Gestão · PDV & Inventário", withLogo && logo ? 30 : 14, 24);
 
@@ -655,4 +657,72 @@ export async function payrollReportPdf(opts: { store: PdfStore; payroll: PdfPayr
   });
 
   finishDoc(ctx, `folha-cic-${payroll.month}.pdf`);
+}
+
+// =============== 7. COMISSÕES (v3.0, M1 da varredura) ===============
+export type PdfComissoes = {
+  dias: Array<{ dia: string; vendedores: Array<{ userId: string; nome: string; vendas: number; artigos: number; comissao: number }>; totalDia: number }>;
+  vendedores: Array<{ userId: string; nome: string; vendas: number; artigos: number; comissao: number }>;
+  total: number;
+};
+
+export async function comissoesReportPdf(opts: {
+  store: PdfStore; comissoes: PdfComissoes; fromLabel: string; toLabel: string; generatedBy: string;
+}) {
+  const { store, comissoes, fromLabel, toLabel, generatedBy } = opts;
+  await loadLogo();
+  const ctx = await buildCtx(store, "Comissões", `${fromLabel} - ${toLabel}`, generatedBy);
+  const { doc } = ctx;
+  let y = 40;
+  y = stampLine(ctx, y);
+
+  y = summaryBoxes(ctx, y, [
+    { label: "Dias com vendas", value: String(comissoes.dias.length) },
+    { label: "Vendedores", value: String(comissoes.vendedores.length) },
+    { label: "Artigos elegíveis", value: String(comissoes.vendedores.reduce((a, v) => a + v.artigos, 0)) },
+    { label: "Total de comissões", value: money(comissoes.total), color: GREEN },
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Dia", "Vendedor", "Vendas", "Artigos", "Comissão do dia"]],
+    body: comissoes.dias.flatMap((d) =>
+      d.vendedores.map((v) => [
+        fmtD(`${d.dia}T12:00:00Z`), v.nome, String(v.vendas), String(v.artigos), money(v.comissao),
+      ])
+    ),
+    foot: [["TOTAL", "", String(comissoes.vendedores.reduce((a, v) => a + v.vendas, 0)), String(comissoes.vendedores.reduce((a, v) => a + v.artigos, 0)), money(comissoes.total)]],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 1.8, lineColor: LINE, textColor: DARK },
+    headStyles: { fillColor: GOLD, textColor: DARK, fontStyle: "bold" },
+    footStyles: { fillColor: DARK, textColor: [255, 235, 170], fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [252, 250, 245] },
+    columnStyles: {
+      2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right", fontStyle: "bold", textColor: GREEN },
+    },
+    margin: { left: 14, right: 14 },
+  });
+
+  // Resumo por vendedor (aproveita a última posição da tabela)
+  let y2 = lastY(doc, y) + 8;
+  if (comissoes.vendedores.length > 1) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...DARK);
+    doc.text("Totais por vendedor no período", 14, y2);
+    y2 += 4;
+    autoTable(doc, {
+      startY: y2,
+      head: [["Vendedor", "Vendas", "Artigos", "Comissões"]],
+      body: comissoes.vendedores.map((v) => [v.nome, String(v.vendas), String(v.artigos), money(v.comissao)]),
+      theme: "grid",
+      styles: { fontSize: 8, cellPadding: 1.8, lineColor: LINE, textColor: DARK },
+      headStyles: { fillColor: GOLD, textColor: DARK, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [252, 250, 245] },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right", fontStyle: "bold", textColor: GREEN } },
+      margin: { left: 14, right: 14 },
+    });
+  }
+
+  finishDoc(ctx, `comissoes-cic-${fromLabel.replace(/\//g, "-")}_${toLabel.replace(/\//g, "-")}.pdf`);
 }

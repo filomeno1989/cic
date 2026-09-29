@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
+import { buildBackupPayload, LIMITE_JSON } from "@/lib/backup-payload"
 
 /*
  * Backup completo dos dados da loja (só gerente).
@@ -29,59 +30,10 @@ export async function GET(req: NextRequest) {
 
     const semFotos = new URL(req.url).searchParams.get("semFotos") === "1"
 
-    const [
-      settings, users, counters, products, productVariants, stockEntries,
-      stockLosses, customers, creditPayments, sales, saleItems, payments,
-      vales, expenses, cashClosings,
-    ] = await Promise.all([
-      db.settings.findMany(),
-      db.user.findMany(),
-      db.counter.findMany(),
-      db.product.findMany(),
-      db.productVariant.findMany(),
-      db.stockEntry.findMany(),
-      db.stockLoss.findMany(),
-      db.customer.findMany(),
-      db.creditPayment.findMany(),
-      db.sale.findMany(),
-      db.saleItem.findMany(),
-      db.payment.findMany(),
-      db.vale.findMany(),
-      db.expense.findMany(),
-      db.cashClosing.findMany(),
-    ])
-    const productImages = semFotos
-      ? []
-      : await db.productImage.findMany() // v2.4: FOTOS no backup (C2 da auditoria)
-
-    const counts = {
-      produtos: products.length,
-      variantes: productVariants.length,
-      fotos: productImages.length,
-      clientes: customers.length,
-      vendas: sales.length,
-      despesas: expenses.length,
-      funcionarios: users.length,
-    }
-
-    // v2.6 (D5): serializar UMA vez para medir o tamanho real antes de
-    // responder - o limite de resposta de serverless na Vercel é ~4.5MB e
-    // um export cortado a meio seria um backup inútil.
-    const payload = {
-      meta: { app: APP_TAG, version: 2, exportedAt: new Date().toISOString(), counts, semFotos },
-      settings, users, counters, products,
-      productVariants, stockEntries, stockLosses,
-      customers, creditPayments, sales, saleItems, payments,
-      vales, expenses, cashClosings,
-      // Bytes → base64 para o JSON (restaurado com Buffer.from)
-      productImages: productImages.map((img) => ({
-        id: img.id, productId: img.productId, mime: img.mime,
-        dados: Buffer.from(img.dados).toString("base64"),
-        createdAt: img.createdAt,
-      })),
-    }
-    const json = JSON.stringify(payload)
-    if (json.length > 4_000_000) {
+    // v3.0: o corpo do export vive em src/lib/backup-payload.ts (partilhado
+    // com o backup automático diário - MESMO formato, sem duplicação).
+    const { json } = await buildBackupPayload(semFotos)
+    if (json.length > LIMITE_JSON) {
       return NextResponse.json(
         {
           error: semFotos

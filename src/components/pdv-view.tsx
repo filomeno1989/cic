@@ -499,11 +499,11 @@ export function PdvView({
                   <p className="text-xs text-muted-foreground">{mt(i.unitPrice)}</p>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => changeQty(i.variantId, -1)}>
+                  <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => changeQty(i.variantId, -1)}>
                     <Minus className="w-3 h-3" />
                   </Button>
                   <span className="w-7 text-center text-sm font-bold">{i.qty}</span>
-                  <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => changeQty(i.variantId, 1)}>
+                  <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => changeQty(i.variantId, 1)}>
                     <Plus className="w-3 h-3" />
                   </Button>
                 </div>

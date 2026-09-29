@@ -85,6 +85,11 @@ export function ReceiptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* v3.0 (U1 da varredura): o @page tem de acompanhar a largura da
+          impressora - impressora de 58mm com @page 80mm cortava o recibo
+          ao meio. Injetamos o @page certo enquanto o diálogo está aberto
+          (um @page novo no fim do documento substitui o predefinido). */}
+      <style media="print">{`@page { margin: 0; size: ${is58 ? "58mm" : "80mm"} auto; }`}</style>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

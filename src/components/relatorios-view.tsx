@@ -8,13 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { mt, fmtDateTime, methodLabel } from "@/lib/format";
+import { fetchT } from "@/lib/http";
 import { wallClockMZ, mzMidnight, mzEndOfDay, currentMonthMZ } from "@/lib/tz";
 import type { SaleFlat, SessionUser, ProductVariantFlat, CustomerFlat } from "@/lib/types";
-import { Receipt, Ban, Loader2, Search, FileDown, ShoppingCart, Wallet, Package, TrendingDown, TrendingUp, Users2, CalendarDays, Percent, Boxes, Sparkles } from "lucide-react";
+import { Receipt, Ban, Loader2, Search, FileDown, ShoppingCart, Wallet, Package, TrendingDown, TrendingUp, Users2, CalendarDays, Percent, Boxes, Sparkles, Coins } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ManagerPinDialog } from "@/components/manager-pin";
 import { ReceiptDialog, type StoreInfo } from "@/components/receipt";
-import { salesReportPdf, debtorsReportPdf, stockReportPdf, expensesReportPdf, payrollReportPdf, lucroReportPdf } from "@/lib/pdf";
+import { salesReportPdf, debtorsReportPdf, stockReportPdf, expensesReportPdf, payrollReportPdf, lucroReportPdf, comissoesReportPdf, type PdfComissoes } from "@/lib/pdf";
 
 type Expense = { id: string; category: string; description: string | null; amount: number; date: string; user?: { name: string } };
 
@@ -96,6 +97,29 @@ export function RelatoriosView({
   const [lucroPeriod, setLucroPeriod] = useState<PeriodKey>("mes");
   const [lucroData, setLucroData] = useState<LucroData | null>(null);
   const [lucroLoading, setLucroLoading] = useState(false);
+
+  // ---------- COMISSÕES (v3.0, M1 da varredura) ----------
+  const [comPeriod, setComPeriod] = useState<PeriodKey>("mes");
+  const [comData, setComData] = useState<PdfComissoes | null>(null);
+  const [comLoading, setComLoading] = useState(false);
+
+  const loadComissoes = useCallback(async (p: PeriodKey) => {
+    setComLoading(true);
+    try {
+      const { from, to } = periodRange(p);
+      const params = new URLSearchParams();
+      if (from) params.set("from", from.toISOString());
+      if (to) params.set("to", to.toISOString());
+      const res = await fetchT(`/api/comissoes?${params}`);
+      if (res.ok) setComData(await res.json());
+    } catch { /* offline */ } finally {
+      setComLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isManager && tab === "comissoes") loadComissoes(comPeriod);
+  }, [isManager, tab, comPeriod, loadComissoes]);
 
   const loadLucro = useCallback(async (p: PeriodKey) => {
     setLucroLoading(true);
@@ -260,6 +284,14 @@ export function RelatoriosView({
       });
     }, "Relatório de lucro descarregado.");
 
+  // v3.0 (M1): PDF do relatório de comissões por dia/vendedor
+  const genComissoes = () =>
+    generate("comissoes", async () => {
+      if (!comData) throw new Error("As comissões ainda não carregaram");
+      const { fromLabel, toLabel } = periodRange(comPeriod);
+      await comissoesReportPdf({ store, generatedBy: user.name, fromLabel, toLabel, comissoes: comData });
+    }, "Relatório de comissões descarregado.");
+
   const pdfBusyIcon = (key: string) =>
     pdfBusy === key ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />;
 
@@ -268,6 +300,7 @@ export function RelatoriosView({
       <Tabs value={tab} onValueChange={setTab} defaultValue="vendas">
         <TabsList>
           <TabsTrigger value="vendas" className="gap-1.5"><ShoppingCart className="w-3.5 h-3.5" /> Vendas</TabsTrigger>
+          {isManager && <TabsTrigger value="comissoes" className="gap-1.5"><Coins className="w-3.5 h-3.5" /> Comissões</TabsTrigger>}
           {isManager && <TabsTrigger value="lucro" className="gap-1.5"><TrendingUp className="w-3.5 h-3.5" /> Lucro</TabsTrigger>}
           {isManager && <TabsTrigger value="pdf" className="gap-1.5"><FileDown className="w-3.5 h-3.5" /> Relatórios PDF</TabsTrigger>}
         </TabsList>
@@ -345,6 +378,96 @@ export function RelatoriosView({
             </div>
           </div>
         </TabsContent>
+
+        {/* ---------- COMISSÕES (v3.0, M1 da varredura - pedido claro:
+            "o relatório que teria evitado a confusão da comissão") ---------- */}
+        {isManager && (
+          <TabsContent value="comissoes" className="space-y-4">
+            <div className="card-lux p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-sm">Comissões por dia e vendedor</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  O que cada regra pagou em cada dia - vendas CONCLUÍDAS, no fuso de Maputo. Anulações saem automaticamente.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => setComPeriod(p.key)}
+                    className={`px-3 h-8 rounded-full text-xs font-medium border transition-all ${
+                      comPeriod === p.key ? "border-gold bg-accent text-accent-foreground" : "border-border text-muted-foreground hover:border-gold/50"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={genComissoes} disabled={pdfBusy !== null || !comData}>
+                  {pdfBusyIcon("comissoes-pdf")} PDF
+                </Button>
+              </div>
+            </div>
+
+            {comLoading && !comData ? (
+              <div className="flex justify-center py-10 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin" /></div>
+            ) : !comData || comData.dias.length === 0 ? (
+              <div className="card-lux p-8 text-center text-sm text-muted-foreground">Sem comissões no período escolhido.</div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="card-lux p-4"><p className="text-[11px] text-muted-foreground">Total de comissões</p><p className="text-lg font-bold text-green-600 mt-1">{mt(comData.total)}</p></div>
+                  <div className="card-lux p-4"><p className="text-[11px] text-muted-foreground">Dias com vendas</p><p className="text-lg font-bold mt-1">{comData.dias.length}</p></div>
+                  <div className="card-lux p-4"><p className="text-[11px] text-muted-foreground">Vendas concluídas</p><p className="text-lg font-bold mt-1">{comData.vendedores.reduce((a, v) => a + v.vendas, 0)}</p></div>
+                  <div className="card-lux p-4"><p className="text-[11px] text-muted-foreground">Artigos vendidos</p><p className="text-lg font-bold mt-1">{comData.vendedores.reduce((a, v) => a + v.artigos, 0)}</p></div>
+                </div>
+
+                <div className="card-lux overflow-hidden">
+                  <div className="overflow-x-auto max-h-[calc(100vh-420px)] overflow-y-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-card z-10">
+                        <TableRow>
+                          <TableHead>Dia</TableHead>
+                          <TableHead>Vendedor</TableHead>
+                          <TableHead className="text-right">Vendas</TableHead>
+                          <TableHead className="text-right">Artigos</TableHead>
+                          <TableHead className="text-right">Comissão</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {comData.dias.map((d) => (
+                          d.vendedores.map((v, i) => (
+                            <TableRow key={`${d.dia}-${v.userId}`}>
+                              <TableCell className="text-xs font-medium">{i === 0 ? d.dia.split("-").reverse().join("/") : ""}</TableCell>
+                              <TableCell className="text-xs">{v.nome}</TableCell>
+                              <TableCell className="text-right text-xs">{v.vendas}</TableCell>
+                              <TableCell className="text-right text-xs">{v.artigos}</TableCell>
+                              <TableCell className="text-right text-xs font-semibold text-green-600">{mt(v.comissao)}</TableCell>
+                            </TableRow>
+                          ))
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+
+                {comData.vendedores.length > 0 && (
+                  <div className="card-lux p-4">
+                    <h3 className="text-sm font-semibold mb-2">Totais por vendedor no período</h3>
+                    <div className="space-y-1.5">
+                      {comData.vendedores.map((v) => (
+                        <div key={v.userId} className="flex items-center justify-between text-sm bg-muted/40 rounded-lg px-3 py-2">
+                          <span className="font-medium">{v.nome}</span>
+                          <span className="text-xs text-muted-foreground mr-3">{v.vendas} vendas · {v.artigos} artigos</span>
+                          <span className="font-bold text-green-600">{mt(v.comissao)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </TabsContent>
+        )}
 
         {/* ---------- LUCRO (v2.7 - pedido da Cleide) ---------- */}
         {isManager && (

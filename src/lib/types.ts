@@ -48,6 +48,7 @@ export type CustomerFlat = {
   notes?: string | null
   balance: number
   active?: boolean
+  diasFiado?: number | null // v3.0 (M3): dias desde a última movimentação da dívida (só com saldo > 0)
 }
 
 export type SaleFlat = {

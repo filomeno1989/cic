@@ -17,6 +17,14 @@ import { useToast } from "@/hooks/use-toast";
 import type { StoreInfo } from "@/components/receipt";
 import type { SessionUser } from "@/lib/types";
 
+// ============================================================
+// v3.0 (M2): BACKUP AUTOMÁTICO DIÁRIO - lista + criar agora + descarregar.
+// O sistema cria sozinho 1 snapshot por dia (na 1ª sessão de gerente do dia);
+// este cartão mostra o que existe e permite descarregar/restaurar pelo
+// fluxo normal. Mantém os últimos 7.
+// ============================================================
+type BackupAutoSnap = { id: string; data: string; tamanho: number; comFotos: boolean; criadoEm: string };
+
 const LAST_BACKUP_KEY = "cic_last_backup";
 
 export function DefinicoesView({
@@ -34,6 +42,9 @@ export function DefinicoesView({
   // Backup
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  // v3.0 (M2): backups automáticos
+  const [autoSnaps, setAutoSnaps] = useState<BackupAutoSnap[] | null>(null);
+  const [autoBusy, setAutoBusy] = useState(false);
   const [pendingRestore, setPendingRestore] = useState<{ name: string; payload: unknown; meta: { exportedAt?: string; counts?: Record<string, number> } } | null>(null);
   // v2.6 (D6): por omissão o restauro PRESERVA contas de funcionários e
   // definições da loja - substituir é opt-in (checkbox no diálogo).
@@ -58,6 +69,50 @@ export function DefinicoesView({
   useEffect(() => {
     setPortalLink(`${window.location.origin}/loja?msg=${encodeURIComponent(waMsg)}`);
   }, [waMsg]);
+
+  // v3.0 (M2): carregar a lista de snapshots automáticos (só gerente)
+  const loadAuto = async () => {
+    try {
+      const res = await fetch("/api/backup/auto");
+      if (res.ok) setAutoSnaps((await res.json()).snaps ?? []);
+    } catch { /* offline */ }
+  };
+  useEffect(() => {
+    if (isManager) void loadAuto();
+  }, [isManager]);
+
+  const criarAutoAgora = async () => {
+    setAutoBusy(true);
+    try {
+      const res = await fetch("/api/backup/auto", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Erro");
+      toast({ title: data.jaExiste ? "O backup de hoje já estava guardado" : "Backup automático de hoje criado", description: `Snapshot ${data.snapshot?.data} · ${(Math.round((data.snapshot?.tamanho ?? 0) / 1024)).toLocaleString("pt-PT")} KB` });
+      void loadAuto();
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro no backup automático", variant: "destructive" });
+    } finally {
+      setAutoBusy(false);
+    }
+  };
+
+  const descarregarAuto = async (snap: BackupAutoSnap) => {
+    try {
+      const res = await fetch(`/api/backup/auto?id=${snap.id}`);
+      if (!res.ok) throw new Error("Não foi possível descarregar");
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backup-automatico-${snap.data}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast({ title: "Backup descarregado", description: `Snapshot de ${snap.data} - pode restaurá-lo em «Restaurar de Ficheiro».` });
+    } catch (e) {
+      toast({ title: e instanceof Error ? e.message : "Erro ao descarregar", variant: "destructive" });
+    }
+  };
 
   // P2: QR gerado no navegador (sem rede) a partir do link
   useEffect(() => {
@@ -347,6 +402,47 @@ export function DefinicoesView({
           <p className="text-xs text-muted-foreground">Apenas o gerente pode fazer e restaurar backups.</p>
         )}
       </div>
+
+      {/* ---------- v3.0 (M2): Backup automático diário (só gerente) ---------- */}
+      {isManager && (
+        <div className="card-lux p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center"><CheckCircle2 className="w-4.5 h-4.5 text-green-600" /></span>
+            <div>
+              <h3 className="font-bold text-sm">Backup automático (diário)</h3>
+              <p className="text-xs text-muted-foreground">O sistema guarda sozinho 1 cópia por dia (mantém as últimas 7) - protege de restauros maus e apagamentos acidentais.</p>
+            </div>
+          </div>
+          {autoSnaps === null ? (
+            <p className="text-xs text-muted-foreground">A procurar snapshots…</p>
+          ) : autoSnaps.length === 0 ? (
+            <p className="text-xs text-muted-foreground bg-muted rounded-lg px-3 py-2">Ainda não há snapshots automáticos - o primeiro é criado na próxima vez que entrar como gerente, ou toque em «Fazer agora».</p>
+          ) : (
+            <div className="space-y-1.5">
+              {autoSnaps.map((s) => (
+                <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 text-sm bg-muted/40 rounded-lg px-3 py-2">
+                  <span className="font-medium">{s.data.split("-").reverse().join("/")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {s.comFotos ? "com fotos" : "sem fotos"} · {(s.tamanho / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => descarregarAuto(s)}>
+                      <Download className="w-3 h-3 mr-1" /> Descarregar
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => fileRef.current?.click()} disabled={restoring}>
+                      <Upload className="w-3 h-3 mr-1" /> Restaurar
+                    </Button>
+                  </span>
+                </div>
+              ))}
+              <p className="text-[11px] text-muted-foreground">«Restaurar» abre o diálogo normal de restauro - escolha o ficheiro descarregado do dia que quiser repor.</p>
+            </div>
+          )}
+          <Button variant="outline" className="w-full" onClick={criarAutoAgora} disabled={autoBusy}>
+            {autoBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <DatabaseBackup className="w-4 h-4 mr-1 text-gold" />} Fazer backup de hoje agora
+          </Button>
+        </div>
+      )}
 
       <div className="card-lux p-5 space-y-2">
         <h3 className="font-bold text-sm">Como ligar a impressora térmica</h3>

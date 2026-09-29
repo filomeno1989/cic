@@ -79,11 +79,17 @@ export async function receiptImageBlob(sale: SaleFlat, store: StoreInfo): Promis
   const logo = await loadLogo("/logo-cic-small.png");
 
   // ---- 1ª passagem: desenhar num canvas alto, medir a altura final ----
+  // v3.0 (U3 da varredura): a altura era FIXA em 2400px lógicos (×2 de
+  // escala) mesmo para recibos de 2 artigos - memória e tempo desperdiçados
+  // (2400×380 lógicos = 4800×760 reais). Agora estimamos pela quantidade de
+  // itens/pagamentos: base folgada 560 + itens ~52 cada + pagamentos ~24 cada,
+  // com mínimo 800 e o tecto 2400 mantido (igual ao anterior) para recibos longos.
+  const estH = Math.min(2400, Math.max(800, 560 + sale.items.length * 52 + sale.payments.length * 24));
   canvas.width = W * S;
-  canvas.height = 2400 * S;
+  canvas.height = estH * S;
   ctx.scale(S, S);
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, W, 2400);
+  ctx.fillRect(0, 0, W, estH);
   ctx.textBaseline = "alphabetic";
 
   let y = M + 6;

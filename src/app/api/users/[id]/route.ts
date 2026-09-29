@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getSessionUser, unauthorized, forbidden } from "@/lib/auth"
 import { hashPin, pinLookupHmac } from "@/lib/pin"
-import { recalcularComissoesDoDia } from "@/lib/comissao"
+import { recalcularComissoesTotais } from "@/lib/comissao"
 
 // PUT /api/users/[id] - atualizar funcionário (só gerente - validado na SESSÃO)
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -60,9 +60,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       },
     })
 
-    // v2.8: se a regra de comissão mudou, o dia de hoje do vendedor recalcula
-    // na hora (modo DIA) - as vendas já feitas hoje ficam coerentes com a
-    // regra nova sem esperar pela venda seguinte. Nos modos TODAS é no-op.
+    // v2.9: se a regra de comissão mudou, TODO o histórico do vendedor
+    // recalcula na hora com a regra nova - a folha deixa de misturar comissões
+    // antigas (gravadas com a regra anterior) com as da regra actual.
     const novoMin = Math.max(0, Math.min(999, Math.floor(Number(commissionMinQty ?? target.commissionMinQty) || 0)))
     const novoMode = commissionMode === "DIA" ? "DIA" : commissionMode === "TODAS" ? "TODAS" : target.commissionMode
     const novoPct = commissionPct !== undefined ? Number(commissionPct) || 0 : target.commissionPct
@@ -72,7 +72,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       novoPct !== target.commissionPct
     ) {
       try {
-        await db.$transaction((tx) => recalcularComissoesDoDia(tx, id, new Date()))
+        await db.$transaction((tx) => recalcularComissoesTotais(tx, id))
       } catch { /* best-effort - a folha recalcula à próxima venda */ }
     }
 

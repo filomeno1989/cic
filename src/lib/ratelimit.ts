@@ -60,6 +60,14 @@ export function segundosRestantes(ambito: string, ip: string): number {
   return Math.max(1, Math.ceil((r.bloqueadoAte - Date.now()) / 1000));
 }
 
+/** v2.9: tentativas que ainda pode falhar antes do bloqueio (para avisar na UI). */
+export function tentativasRestantes(ambito: string, ip: string): number {
+  const r = registos.get(chave(ambito, ip));
+  if (!r || (r.bloqueadoAte > 0 && r.bloqueadoAte <= Date.now())) return MAX_FALHAS;
+  if (r.bloqueadoAte > Date.now()) return 0;
+  return Math.max(0, MAX_FALHAS - r.falhas);
+}
+
 /** Registar uma tentativa falhada. A 5ª consecutiva bloqueia 15 min. */
 export function registarFalha(ambito: string, ip: string): void {
   const k = chave(ambito, ip);

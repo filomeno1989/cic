@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Delete, Loader2, Lock, KeyRound, Sparkles, ArrowLeft } from "lucide-react";
+import { Delete, Loader2, Lock, KeyRound, Sparkles, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
 import { fetchT } from "@/lib/http";
@@ -22,6 +22,7 @@ const initials = (name: string) =>
 
 export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void }) {
   const [pin, setPin] = useState("");
+  const [verPin, setVerPin] = useState(false); // v2.9: olho para revelar/esconder o código
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const { toast } = useToast();
@@ -72,7 +73,13 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "PIN inválido");
+        // v2.9: quando faltam 1-2 tentativas para o bloqueio, avisa já
+        const restam = typeof data.restam === "number" ? data.restam : 0;
+        const aviso =
+          restam > 0 && restam <= 2
+            ? ` · Resta${restam === 1 ? "m" : ""} ${restam} tentativa${restam === 1 ? "" : "s"} antes do bloqueio de 15 min`
+            : "";
+        throw new Error((data.error ?? "PIN inválido") + aviso);
       }
       const user: SessionUser = await res.json();
       toast({ title: `Bem-vindo(a), ${user.name}`, description: user.role === "GERENTE" ? "Acesso de Gerente" : "Acesso de Caixa" });
@@ -263,17 +270,35 @@ export function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void 
             )}
 
             <p className="text-center text-[11px] text-[#a1a1aa] mb-2">{hint}</p>
-            <div className="flex justify-center gap-3 mb-4 h-4">
-              {/* Bolinhas dinâmicas: começam em 4 e crescem até 6 conforme se digita -
-                  comunica visualmente que o PIN pode ter 4, 5 ou 6 dígitos */}
-              {Array.from({ length: Math.min(6, Math.max(4, pin.length)) }).map((_, i) => (
-                <span
-                  key={i}
-                  className={`w-3 h-3 rounded-full border transition-all ${
-                    i < pin.length ? "bg-[#d4af37] border-[#d4af37]" : "border-[#52525b] " + (error ? "border-red-500" : "")
-                  }`}
-                />
-              ))}
+            {/* v2.9: barra de código segmentada - cada dígito no seu quadrado,
+                com o olho para revelar/esconder (pediu o dono). Começa em 4
+                quadrados e cresce até 6, como as bolinhas antes. */}
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <div className="flex gap-2">
+                {Array.from({ length: Math.min(6, Math.max(4, pin.length)) }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={`w-10 h-12 rounded-lg border flex items-center justify-center text-xl font-semibold bg-[#1c1c1c] transition-all ${
+                      error
+                        ? "border-red-500 text-red-400"
+                        : i < pin.length
+                          ? "border-[#d4af37] text-[#e9d9a8]"
+                          : "border-[#3f3f46] text-transparent"
+                    }`}
+                  >
+                    {i < pin.length ? (verPin ? pin[i] : "•") : "·"}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setVerPin((v) => !v)}
+                aria-label={verPin ? "Esconder código" : "Ver código"}
+                title={verPin ? "Esconder código" : "Ver código"}
+                className="h-12 px-3 rounded-lg border border-[#3f3f46] bg-[#1c1c1c] text-[#a1a1aa] hover:text-[#d4af37] hover:border-[#d4af37]/60 transition-colors"
+              >
+                {verPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
             </div>
 
             <div className="grid grid-cols-3 gap-3">

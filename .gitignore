@@ -56,3 +56,15 @@ server.log
 .env
 .env.*
 tool-results/
+
+# ---- v2.9: desenvolvimento local - NUNCA no repo (segredos/dados) ----
+/scripts/
+/worklog.md
+/tool-results/
+/download/
+/upload/
+/tests/
+/.zscripts/
+/mini-services/
+/db/
+/deploy/

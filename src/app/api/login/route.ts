@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { signToken, cookieOptions, SESSION_COOKIE } from "@/lib/session";
-import { bloqueado, segundosRestantes, registarFalha, registarSucesso, ipDoPedido, MSG_BLOQUEIO } from "@/lib/ratelimit";
+import { bloqueado, segundosRestantes, registarFalha, registarSucesso, ipDoPedido, tentativasRestantes, MSG_BLOQUEIO } from "@/lib/ratelimit";
 import { pinConfere, pinLookupHmac } from "@/lib/pin";
 
 /*
@@ -48,7 +48,13 @@ export async function POST(req: NextRequest) {
     // O PIN tem de conferir (hash scrypt, ou legado em contas antigas)
     if (!candidato || !pinConfere(pinStr, candidato)) {
       registarFalha("login", ip);
-      return NextResponse.json({ error: "PIN inválido ou utilizador inativo" }, { status: 401 })
+      // v2.9: avisa quantas tentativas faltam para o bloqueio de 15 min
+      // (antes o utilizador só descobria o limite quando ficava bloqueado)
+      const restam = tentativasRestantes("login", ip);
+      return NextResponse.json(
+        { error: "PIN inválido ou utilizador inativo", restam },
+        { status: 401 }
+      )
     }
 
     registarSucesso("login", ip);

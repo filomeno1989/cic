@@ -402,6 +402,9 @@ Fica apagada do histórico e do fecho do caixa.`)) return;
                     <TableRow>
                       <TableHead>Turno fechado</TableHead>
                       <TableHead>Operador</TableHead>
+                      {/* v3.4: vendas do turno visíveis - explica porque o esperado
+                          por carteira pode ser menor: o fiado NÃO entra no dinheiro */}
+                      <TableHead className="text-right" title="Total de vendas CONCLUÍDAS do turno - inclui fiação, que não entra no dinheiro esperado">Vendas do turno</TableHead>
                       <TableHead className="text-right">💵 Dinheiro (contado/esp.)</TableHead>
                       <TableHead className="text-right">💳 POS</TableHead>
                       <TableHead className="text-right">📱 M-Pesa</TableHead>
@@ -416,6 +419,10 @@ Fica apagada do histórico e do fecho do caixa.`)) return;
                         <TableRow key={c.id}>
                           <TableCell className="text-xs">{fmtDateTime(c.closedAt)}</TableCell>
                           <TableCell className="text-sm">{c.userName}</TableCell>
+                          <TableCell className="text-right">
+                            <p className="text-xs font-medium">{mt(c.salesTotal ?? 0)}</p>
+                            <p className="text-[10px] text-muted-foreground">inclui fiação</p>
+                          </TableCell>
                           <TableCell className="text-right">
                             <p className="text-xs">{mt(c.countedCash)} <span className="text-muted-foreground">/ {mt(c.expectedCash ?? 0)}</span></p>
                             <DifBadge d={c.diffCash ?? 0} />
@@ -455,7 +462,7 @@ Fica apagada do histórico e do fecho do caixa.`)) return;
                       );
                     })}
                     {closings.length === 0 && (
-                      <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground text-sm py-8">Sem fechos registados.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground text-sm py-8">Sem fechos registados.</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>

@@ -203,7 +203,7 @@ export default function Home() {
           <ProdutosView user={user} catalog={catalog} onReload={bumpData} />
         )}
         {view === "clientes" && (
-          <ClientesView user={user} onClientsChanged={bumpData} />
+          <ClientesView user={user} store={store} onClientsChanged={bumpData} />
         )}
         {view === "financeiro" && (
           <FinanceiroView user={user} online={online} onDataChanged={bumpData} />

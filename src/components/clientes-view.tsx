@@ -7,9 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { mt, fmtDate, fmtDateTime, waLink, methodLabel, PAYMENT_METHODS } from "@/lib/format";
+import { mt, fmtDate, fmtDateTime, waLink, methodLabel, PAYMENT_METHODS, mensagemCobranca } from "@/lib/format";
 import { fetchT } from "@/lib/http";
 import type { CustomerFlat, SessionUser } from "@/lib/types";
+import type { StoreInfo } from "@/components/receipt";
 import { Search, UserPlus, Phone, HandCoins, History, Loader2, Wallet, MessageCircle, Archive, ArchiveRestore, Trash2, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -19,7 +20,7 @@ type CustomerDetail = CustomerFlat & {
   payments: Array<{ id: string; amount: number; method: string; note: string | null; date: string }>;
 };
 
-export function ClientesView({ user, onClientsChanged }: { user: SessionUser; onClientsChanged: () => void }) {
+export function ClientesView({ user, store, onClientsChanged }: { user: SessionUser; store: StoreInfo; onClientsChanged: () => void }) {
   const { toast } = useToast();
   const [clients, setClients] = useState<CustomerFlat[]>([]);
   const [search, setSearch] = useState("");
@@ -209,11 +210,19 @@ export function ClientesView({ user, onClientsChanged }: { user: SessionUser; on
     return `de há ${mes} mês${mes > 1 ? "es" : ""}`;
   };
 
+  // v3.4: o texto agora vem das Definições (editável pelo gerente) -
+  // campo vazio usa o texto padrão, que já termina com as FORMAS DE PAGAMENTO.
   const cobrancaMsg = (c: CustomerFlat) => {
     const quando = diasTexto(c);
     return waLink(
       c.phone,
-      `Olá ${c.name}! 😊\nAqui é da *CIC Fragrâncias & Glamour*.\n\nPassando só para lembrar com carinho que consta um saldo de *${mt(c.balance)}* na sua conta de fiação${quando ? ` (compra ${quando})` : ""}.\n\nQuando puder, apareça na loja ou combine connosco o pagamento. Obrigado pela preferência! ✨`
+      mensagemCobranca({
+        template: store.cobrancaMsg,
+        nome: c.name,
+        loja: store.storeName,
+        valor: mt(c.balance),
+        quando: quando ? ` (compra ${quando})` : "",
+      })
     );
   };
 

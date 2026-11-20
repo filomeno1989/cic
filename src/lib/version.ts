@@ -4,8 +4,8 @@
 // ecrã de login e portal /loja) junto à assinatura de produção.
 // ============================================================
 
-export const APP_VERSION = "3.3";
-export const APP_VERSION_DATE = "Setembro 2026"; // v3.3 - login com avatar grande e FOTO de perfil (upload na RH)
+export const APP_VERSION = "3.5";
+export const APP_VERSION_DATE = "Novembro 2026"; // v3.5 - mensagem de cobrança (fiação) editável nas Definições + formas de pagamento no fim do texto
 
 export const APP_VERSION_LABEL = `Versão atualizada para ${APP_VERSION} · ${APP_VERSION_DATE}`;
 

@@ -52,7 +52,7 @@ export async function PUT(req: NextRequest) {
     if (session.role !== "GERENTE") return forbidden()
 
     const body = await req.json()
-    const { storeName, phone, address, receiptFooter, thermalWidth, nuit, expenseCategories, productCategories, productBrands, whatsappLoja, instagramUrl, facebookUrl, tiktokUrl } = body
+    const { storeName, phone, address, receiptFooter, thermalWidth, nuit, expenseCategories, productCategories, productBrands, whatsappLoja, instagramUrl, facebookUrl, tiktokUrl, cobrancaMsg } = body
 
     // Categorias: devem ser arrays de strings (podem vir apenas uma das listas)
     const expenseJson =
@@ -97,6 +97,8 @@ export async function PUT(req: NextRequest) {
         ...(instagramUrl !== undefined && { instagramUrl: typeof instagramUrl === "string" ? instagramUrl.trim() : "" }),
         ...(facebookUrl !== undefined && { facebookUrl: typeof facebookUrl === "string" ? facebookUrl.trim() : "" }),
         ...(tiktokUrl !== undefined && { tiktokUrl: typeof tiktokUrl === "string" ? tiktokUrl.trim() : "" }),
+        // v3.4: mensagem de cobrança (fiação) editável - vazio = texto padrão. Limite de 2000 caracteres.
+        ...(cobrancaMsg !== undefined && { cobrancaMsg: typeof cobrancaMsg === "string" ? cobrancaMsg.slice(0, 2000) : "" }),
         ...(expenseJson !== undefined && { expenseCategories: expenseJson }),
         ...(productJson !== undefined && { productCategories: productJson }),
         ...(brandJson !== undefined && { productBrands: brandJson }),
@@ -107,6 +109,7 @@ export async function PUT(req: NextRequest) {
         ...(instagramUrl !== undefined && { instagramUrl: typeof instagramUrl === "string" ? instagramUrl.trim() : "" }),
         ...(facebookUrl !== undefined && { facebookUrl: typeof facebookUrl === "string" ? facebookUrl.trim() : "" }),
         ...(tiktokUrl !== undefined && { tiktokUrl: typeof tiktokUrl === "string" ? tiktokUrl.trim() : "" }),
+        ...(cobrancaMsg !== undefined && { cobrancaMsg: typeof cobrancaMsg === "string" ? cobrancaMsg.slice(0, 2000) : "" }),
       },
     })
     return NextResponse.json({

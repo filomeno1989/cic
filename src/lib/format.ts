@@ -67,6 +67,44 @@ export const PAYMENT_METHODS = [
   { value: "CREDITO", label: "Fiação", hint: "Crédito na loja" },
 ] as const
 
+// ============================================================
+// v3.4: MENSAGEM DE COBRANÇA EDITÁVEL nas Definições.
+// O dono da loja altera o texto quando quiser (ex.: formas de
+// pagamento no fim) sem precisar de mexer no sistema.
+// Variáveis: {nome} {loja} {valor} {quando}
+//   {quando} chega como " (compra de há 3 dias)" ou "" - já vem
+//   com parênteses, por isso no template fica junto a "fiação".
+// Campo vazio nas definições = usa este texto padrão.
+// ============================================================
+const FORMAS_LBL = PAYMENT_METHODS
+  .filter((p) => p.value !== "CREDITO") // cobrar fiado não deve sugerir mais fiado
+  .map((p) => p.label)
+  .join(", ")
+
+export const MSG_COBRANCA_PADRAO = `Olá {nome}! 😊
+Aqui é da *{loja}*.
+
+Passando só para lembrar com carinho que consta um saldo de *{valor}* na sua conta de fiação{quando}.
+
+Quando puder, apareça na loja ou combine connosco o pagamento. Obrigado pela preferência! ✨
+
+*Formas de pagamento:* ${FORMAS_LBL}`
+
+export function mensagemCobranca(opts: {
+  template?: string | null; // texto das definições (vazio = padrão)
+  nome: string;
+  loja: string;
+  valor: string;
+  quando?: string; // ex.: " (compra de há 3 dias)" - com parênteses
+}): string {
+  const tpl = opts.template && opts.template.trim() ? opts.template : MSG_COBRANCA_PADRAO;
+  return tpl
+    .replaceAll("{nome}", opts.nome)
+    .replaceAll("{loja}", opts.loja)
+    .replaceAll("{valor}", opts.valor)
+    .replaceAll("{quando}", opts.quando ?? "");
+}
+
 export const DEFAULT_EXPENSE_CATEGORIES = [
   "Renda",
   "Salários",

@@ -272,6 +272,7 @@ model Settings {
   instagramUrl      String  @default("") // link completo do Instagram (redes sociais no /loja)
   facebookUrl       String  @default("") // link completo do Facebook (redes sociais no /loja)
   tiktokUrl         String  @default("") // link completo do TikTok (preparado para o futuro)
+  cobrancaMsg       String  @default("") // v3.4: mensagem de cobranca (fiacao) editavel - vazio = texto padrao
 }
 
 // v3.0 (M2 da varredura de melhorias): snapshot diário automático do backup.

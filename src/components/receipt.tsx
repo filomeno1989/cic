@@ -11,6 +11,7 @@ import type { SaleFlat } from "@/lib/types";
 
 export type StoreInfo = {
   storeName: string; phone: string; address: string; receiptFooter: string; thermalWidth: string; nuit?: string; whatsappLoja?: string; instagramUrl?: string; facebookUrl?: string; tiktokUrl?: string;
+  cobrancaMsg?: string; // v3.4: mensagem de cobrança (fiação) editável nas Definições - vazio = texto padrão
 };
 
 export function buildReceiptText(sale: SaleFlat, store: StoreInfo): string {

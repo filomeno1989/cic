@@ -11,9 +11,10 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2, Save, Printer, DatabaseBackup, Upload, Download, AlertTriangle, CheckCircle2, Trash2,
-  QrCode, Copy, Send, ExternalLink, Store, Wrench, CalendarClock,
+  QrCode, Copy, Send, ExternalLink, Store, Wrench, CalendarClock, MessageCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { mt, mensagemCobranca } from "@/lib/format";
 import type { StoreInfo } from "@/components/receipt";
 import type { SessionUser } from "@/lib/types";
 import { mostraHora, MSG_PADRAO_MANUTENCAO } from "@/lib/hora-manutencao";
@@ -343,6 +344,68 @@ export function DefinicoesView({
         )}
       </div>
 
+      {/* ---------- v3.4: Mensagem de cobrança (fiação) editável ---------- */}
+      <div className="card-lux p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center"><MessageCircle className="w-4.5 h-4.5 text-gold" /></span>
+          <div>
+            <h3 className="font-bold text-sm">Mensagem de cobrança (fiação)</h3>
+            <p className="text-xs text-muted-foreground">O texto enviado no WhatsApp ao cobrar um cliente devedor, no ecrã «Clientes». Altere quando quiser - sem precisar de mexer no sistema.</p>
+          </div>
+        </div>
+
+        {isManager ? (
+          <>
+            <div>
+              <Label className="text-xs">Texto da mensagem <span className="text-muted-foreground font-normal">- vazio = usa o texto padrão</span></Label>
+              <Textarea rows={9} value={form.cobrancaMsg ?? ""} disabled={!isManager} onChange={(e) => setForm({ ...form, cobrancaMsg: e.target.value.slice(0, 2000) })} placeholder="Vazio = texto padrão do sistema (já termina com as formas de pagamento)" className="text-sm" />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground mr-1">Variáveis (toque para inserir no fim):</span>
+              {([
+                ["{nome}", "Nome do cliente"],
+                ["{loja}", "Nome da loja"],
+                ["{valor}", "Saldo devido (ex.: 1.250,00 MT)"],
+                ["{quando}", "Desde quando - já vem com parênteses, ex.: (compra de há 3 dias)"],
+              ] as const).map(([tag, desc]) => (
+                <button
+                  key={tag}
+                  type="button"
+                  title={desc}
+                  disabled={!form.cobrancaMsg?.trim()}
+                  onClick={() => setForm({ ...form, cobrancaMsg: ((form.cobrancaMsg ?? "") + " " + tag).trim() })}
+                  className="text-[11px] rounded-md border border-border px-2 py-0.5 transition-colors hover:border-gold/60 hover:bg-accent/40 disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="text-[11px] font-semibold mb-1.5 text-muted-foreground">Pré-visualização (exemplo)</p>
+              <p className="text-xs whitespace-pre-line leading-relaxed">
+                {mensagemCobranca({
+                  template: form.cobrancaMsg,
+                  nome: "Ana Silva",
+                  loja: form.storeName || "CIC Fragrâncias & Glamour",
+                  valor: mt(1250),
+                  quando: " (compra de há 3 dias)",
+                })}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" disabled={saving} onClick={() => { setForm({ ...form, cobrancaMsg: "" }); toast({ title: "Texto padrão restaurado", description: "Clique em Guardar para aplicar." }); }}>
+                Restaurar texto padrão
+              </Button>
+              <Button className="btn-gold flex-1" onClick={save} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Save className="w-4 h-4 mr-1" /> Guardar</>}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">Apenas o gerente pode alterar esta mensagem.</p>
+        )}
+      </div>
+
       {/* ---------- P2: Portal do Cliente (só gerente) ---------- */}
       <div className="card-lux p-5 space-y-3">
         <div className="flex items-center gap-2">
@@ -382,7 +445,6 @@ export function DefinicoesView({
               <p className="text-[11px] text-muted-foreground break-all"><b>Link do portal:</b> {portalLink || "…"}</p>
               <div className="flex items-center gap-3">
                 {qrData ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={qrData} alt="QR Code do portal" className="w-28 h-28 rounded-lg border bg-white p-1 shrink-0" />
                 ) : (
                   <div className="w-28 h-28 rounded-lg border bg-muted animate-pulse shrink-0" />

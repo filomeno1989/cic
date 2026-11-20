@@ -57,13 +57,20 @@ export function DashboardView({
   }
 
   const kpis = [
-    { label: "Vendas de hoje", value: mt(data?.today.total ?? 0), icon: TrendingUp, sub: `${data?.today.count ?? 0} venda(s)`, gold: true },
+    // v3.4: o fiado do dia aparece À VISTA no cartão de vendas - era a confusão
+    // da gerência ("o fiado contabiliza?"): o total de vendas inclui fiado mas a
+    // gaveta não recebe esse dinheiro, então agora a diferença fica etiquetada.
+    { label: "Vendas de hoje", value: mt(data?.today.total ?? 0), icon: TrendingUp,
+      sub: `${data?.today.count ?? 0} venda(s)${(data?.today.credit ?? 0) > 0 ? ` · ${mt(data!.today.credit)} em fiação` : ""}`, gold: true },
     { label: "Dinheiro na gaveta", value: mt(data?.today.cash ?? 0), icon: Banknote, sub: "entradas em dinheiro" },
     { label: "Mobile Money", value: mt(data?.today.mobile ?? 0), icon: Smartphone, sub: "M-Pesa · e-Mola · mKesh" },
     { label: "POS / Cartão", value: mt(data?.today.pos ?? 0), icon: CreditCard, sub: "comprovativos" },
     ...(isManager
-      ? [{ label: "Lucro estimado (hoje)", value: mt(data?.today.profit ?? 0), icon: Wallet, sub: "após custos e despesas", gold: true }]
+      ? [{ label: "Fiação a receber (total)", value: mt(data?.debtTotal ?? 0), icon: HandCoins, sub: "saldos de todos os clientes" }]
       : [{ label: "Fiação emitida hoje", value: mt(data?.today.credit ?? 0), icon: HandCoins, sub: "vendido a crédito" }]),
+    ...(isManager
+      ? [{ label: "Lucro estimado (hoje)", value: mt(data?.today.profit ?? 0), icon: Wallet, sub: "após custos e despesas", gold: true }]
+      : []),
   ];
 
   const maxChart = Math.max(...(data?.chart ?? []).map((c) => c.total), 1);
@@ -86,8 +93,8 @@ export function DashboardView({
         </div>
       )}
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      {/* KPIs - gerente tem 6 cartões (v3.4: +fiação a receber), caixa tem 5 */}
+      <div className={`grid grid-cols-2 ${isManager ? "lg:grid-cols-3 xl:grid-cols-6" : "lg:grid-cols-5"} gap-3`}>
         {kpis.map((k) => (
           <div key={k.label} className={`card-lux p-4 ${k.gold ? "ring-1 ring-gold/40" : ""}`}>
             <k.icon className={`w-4 h-4 mb-2 ${k.gold ? "text-gold" : "text-muted-foreground"}`} />
